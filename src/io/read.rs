@@ -115,6 +115,13 @@ pub struct ReadStats {
     pub recovered_errors: usize,
     pub record_stream_read: bool,
     pub diagnostics: Vec<ReadDiagnostic>,
+    /// Records left out because their class was asked to be skipped
+    /// (`DwgReadOptions::skip_object_classes`,
+    /// `DxfReaderConfiguration::skip_object_classes`), by class DXF name.
+    /// They count in `source_records` but in neither `decoded_source_records`
+    /// nor `skipped_source_records`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub skipped_object_classes: std::collections::BTreeMap<String, usize>,
 }
 
 impl ReadStats {
@@ -155,6 +162,7 @@ impl ReadStats {
             recovered_errors: recovered_error_count(&document.notifications),
             record_stream_read,
             diagnostics,
+            skipped_object_classes: std::collections::BTreeMap::new(),
         }
     }
 
