@@ -43,23 +43,6 @@ where
     }
 }
 
-pub(crate) fn filter_map_slice<T, R, F>(items: &[T], map: F) -> Vec<R>
-where
-    T: Sync,
-    R: Send,
-    F: Fn(&T) -> Option<R> + Send + Sync,
-{
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    {
-        use rayon::prelude::*;
-        items.par_iter().filter_map(map).collect()
-    }
-    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
-    {
-        items.iter().filter_map(map).collect()
-    }
-}
-
 pub(crate) fn map_chunks<T, R, F>(items: &[T], chunk_size: usize, map: F) -> Vec<R>
 where
     T: Sync,

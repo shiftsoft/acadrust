@@ -14,6 +14,16 @@
   unchanged; code that builds these variants wraps the payload in
   `Box::new`, and a pattern that reaches into the payload's fields matches
   the variant first.
+- **Lower DWG read peak** - While the document is built, the DWG reader
+  looks up `LIGHTINGUNITS` only in drawings that have lights and keeps only
+  that entry instead of every dictionary entry, reserves room for every
+  record only when no visitor decides what is stored, builds the
+  entity-to-block map after the record pass and only for stored entities,
+  walks the record catalog instead of a filtered copy, and builds the catalog
+  without a result per handle beside it. What a read returns is unchanged. A
+  visiting read of a drawing of 2.6 million entities peaks at 389 MB instead
+  of 661 MB; one with a 628,000-entry dictionary at 566 MB instead of
+  721 MB.
 - **Skipping object classes** - `DwgReadOptions::skip_object_classes` and
   `DxfReaderConfiguration::skip_object_classes` name non-graphical object
   classes whose records are neither decoded nor stored, such as the DGN
