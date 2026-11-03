@@ -24,7 +24,7 @@ fn add_edge_dependency(document: &mut CadDocument, host: Handle, from: i32, to: 
     let owner = document.header.named_objects_dict_handle;
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner,
             dxf_name: "ACDBASSOCGEOMDEPENDENCY".to_string(),
@@ -42,7 +42,7 @@ fn add_edge_dependency(document: &mut CadDocument, host: Handle, from: i32, to: 
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
 }
 
@@ -148,7 +148,7 @@ fn ignores_non_edge_subentity_dependencies() {
     let owner = document.header.named_objects_dict_handle;
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner,
             dxf_name: "ACDBASSOCGEOMDEPENDENCY".to_string(),
@@ -166,7 +166,7 @@ fn ignores_non_edge_subentity_dependencies() {
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
 
     let assigned = document.restore_constraint_vertex_ids();

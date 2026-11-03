@@ -62,7 +62,7 @@ fn link_dxf() -> String {
     object.owner = document.header.named_objects_dict_handle;
     document
         .objects
-        .insert(handle, ObjectType::ClassObject(object));
+        .insert(handle, ObjectType::ClassObject(Box::new(object)));
 
     let text = String::from_utf8(DxfWriter::new(&document).write_to_vec().expect("write DXF"))
         .expect("ASCII DXF");
@@ -134,10 +134,10 @@ fn dwg_option_carries_the_data_map_bit_only_with_a_map() {
             .objects
             .values()
             .find_map(|object| match object {
-                ObjectType::ClassObject(ClassObject {
-                    data: ClassObjectData::DataLink(link),
-                    ..
-                }) => Some(link.clone()),
+                ObjectType::ClassObject(object) => match &object.data {
+                    ClassObjectData::DataLink(link) => Some(link.clone()),
+                    _ => None,
+                },
                 _ => None,
             })
             .expect("the data link survives")
@@ -158,13 +158,11 @@ fn dwg_option_carries_the_data_map_bit_only_with_a_map() {
     // Without a map, the bit is not written and nothing follows.
     let mut empty = from_dxf.clone();
     for object in empty.objects.values_mut() {
-        if let ObjectType::ClassObject(ClassObject {
-            data: ClassObjectData::DataLink(link),
-            ..
-        }) = object
-        {
-            link.data_map.clear();
-            link.option |= DataLink::HAS_DATA_MAP;
+        if let ObjectType::ClassObject(object) = object {
+            if let ClassObjectData::DataLink(link) = &mut object.data {
+                link.data_map.clear();
+                link.option |= DataLink::HAS_DATA_MAP;
+            }
         }
     }
     let dwg = DwgWriter::write_to_vec(&empty).expect("write DWG");
@@ -180,10 +178,10 @@ fn data_link(document: &CadDocument) -> DataLink {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::DataLink(link),
-                ..
-            }) => Some(link.clone()),
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::DataLink(link) => Some(link.clone()),
+                _ => None,
+            },
             _ => None,
         })
         .expect("a data link")

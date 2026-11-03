@@ -19,7 +19,7 @@ fn dxf_preserves_section_manager_handles() {
     object.owner = document.header.named_objects_dict_handle;
     document
         .objects
-        .insert(handle, ObjectType::ClassObject(object));
+        .insert(handle, ObjectType::ClassObject(Box::new(object)));
 
     let bytes = DxfWriter::new(&document).write_to_vec().expect("write DXF");
     let roundtripped = DxfReader::from_reader(Cursor::new(bytes))

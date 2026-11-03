@@ -18,7 +18,7 @@ fn document_with_geom_dependency(version: DxfVersion) -> CadDocument {
     let owner = document.header.named_objects_dict_handle;
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner,
             dxf_name: "ASSOCGEOMDEPENDENCY".to_string(),
@@ -36,7 +36,7 @@ fn document_with_geom_dependency(version: DxfVersion) -> CadDocument {
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
     document
 }
@@ -49,10 +49,10 @@ fn read_geom_dependency(bytes: Vec<u8>) -> AssocGeomDependency {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::GeomDependency(value),
-                ..
-            }) => Some(value.clone()),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::GeomDependency(value) => Some(value.clone()),
+                _ => None,
+            },
             _ => None,
         })
         .expect("geometry dependency should remain typed")
@@ -67,10 +67,10 @@ fn r2010_geom_dependency_uses_the_text_stream_for_its_class_name() {
         .find(|object| matches!(object, ObjectType::Associative(_)))
         .unwrap()
     {
-        ObjectType::Associative(AssociativeObject {
-            data: AssociativeData::GeomDependency(value),
-            ..
-        }) => value.clone(),
+        ObjectType::Associative(object) => match &object.data {
+            AssociativeData::GeomDependency(value) => value.clone(),
+            _ => unreachable!(),
+        },
         _ => unreachable!(),
     };
 

@@ -33,7 +33,7 @@ use crate::entities::{EntityCommon, EntityType};
 use crate::io::dwg::dwg_reference_type::DwgReferenceType;
 use crate::io::dwg::dwg_stream_writers::DwgMergedWriter;
 use crate::io::dwg::dwg_version::DwgVersion;
-use crate::objects::{ClassObject, ClassObjectData, ObjectType};
+use crate::objects::{ClassObjectData, ObjectType};
 use crate::tables::{BlockRecord, TableEntry};
 use crate::types::{BoundingBox3D, DxfVersion, Handle};
 
@@ -193,12 +193,10 @@ impl<'a> DwgObjectWriter<'a> {
             }
         }
         for (handle, object) in &document.objects {
-            if let ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::DataTable(table),
-                ..
-            }) = object
-            {
-                table.validate()?;
+            if let ObjectType::ClassObject(object) = object {
+                if let ClassObjectData::DataTable(table) = &object.data {
+                    table.validate()?;
+                }
             }
             let h = handle.value() + 1;
             if h > max_h {
@@ -2735,7 +2733,8 @@ mod unregistered_class_tests {
         let mut object =
             AssociativeObject::new("ACDBASSOCPERSSUBENTMANAGER", "AcDbAssocPersSubentManager");
         object.handle = handle;
-        doc.objects.insert(handle, ObjectType::Associative(object));
+        doc.objects
+            .insert(handle, ObjectType::Associative(Box::new(object)));
         doc.classes.clear();
         let (_, handles, _, _) = DwgObjectWriter::new(&doc).unwrap().write();
         handles.into_iter().map(|(h, _)| h).collect()

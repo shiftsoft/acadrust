@@ -6241,7 +6241,7 @@ impl DwgDocumentBuilder {
                         Handle::from(ps.visual_style_handle);
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::Layout(obj),
+                        crate::objects::ObjectType::Layout(Box::new(obj)),
                     );
                 }
                 OBJ_GROUP => {
@@ -6419,7 +6419,7 @@ impl DwgDocumentBuilder {
                         Handle::from(data.visual_style_handle);
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::PlotSettings(obj),
+                        crate::objects::ObjectType::PlotSettings(Box::new(obj)),
                     );
                 }
                 OBJ_MLEADERSTYLE => {
@@ -6506,7 +6506,7 @@ impl DwgDocumentBuilder {
                     obj.unknown_flag_298 = data.unknown_flag_298;
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::MultiLeaderStyle(obj),
+                        crate::objects::ObjectType::MultiLeaderStyle(Box::new(obj)),
                     );
                 }
                 OBJ_IMAGEDEF => {
@@ -6662,7 +6662,7 @@ impl DwgDocumentBuilder {
                         document.objects.insert(
                             Handle::from(handle),
                             crate::objects::ObjectType::ClassObject(
-                                crate::objects::ClassObject {
+                                Box::new(crate::objects::ClassObject {
                                     handle: Handle::from(handle),
                                     owner: owner_handle,
                                     reactors: non_entity_data
@@ -6675,7 +6675,7 @@ impl DwgDocumentBuilder {
                                         .xdictionary_handle
                                         .map(Handle::from),
                                     data,
-                                },
+                                }),
                             ),
                         );
                     }
@@ -6767,7 +6767,7 @@ impl DwgDocumentBuilder {
                         )
                     {
                         crate::objects::ObjectType::RegisteredClass(
-                            crate::objects::RegisteredClassObject {
+                            Box::new(crate::objects::RegisteredClassObject {
                                 handle: Handle::from(handle),
                                 owner: owner_handle,
                                 reactors: non_entity_data
@@ -6787,7 +6787,7 @@ impl DwgDocumentBuilder {
                                 raw_dwg_data: None,
                                 raw_dwg_handle_bits: 0,
                                 raw_dwg_version: None,
-                            },
+                            }),
                         )
                     } else {
                         crate::objects::ObjectType::ProxyObject(
@@ -6864,7 +6864,7 @@ impl DwgDocumentBuilder {
                         .map(Handle::from);
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::Material(obj),
+                        crate::objects::ObjectType::Material(Box::new(obj)),
                     );
                 }
                 OBJ_TABLECONTENT | OBJ_TABLETEMPLATE => {
@@ -6908,9 +6908,9 @@ impl DwgDocumentBuilder {
                     obj.table_style_handle = (style_handle != 0)
                         .then(|| Handle::from(style_handle));
                     let object = if type_code == OBJ_TABLETEMPLATE {
-                        crate::objects::ObjectType::TableTemplate(obj)
+                        crate::objects::ObjectType::TableTemplate(Box::new(obj))
                     } else {
-                        crate::objects::ObjectType::TableContent(obj)
+                        crate::objects::ObjectType::TableContent(Box::new(obj))
                     };
                     document.objects.insert(Handle::from(handle), object);
                 }
@@ -6921,7 +6921,7 @@ impl DwgDocumentBuilder {
                     obj.owner_handle = owner_handle;
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::TableStyle(obj),
+                        crate::objects::ObjectType::TableStyle(Box::new(obj)),
                     );
                 }
                 OBJ_GEODATA => {
@@ -6994,7 +6994,7 @@ impl DwgDocumentBuilder {
                     obj.civil_north_angle_radians = data.civil_north_angle_radians;
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::GeoData(obj),
+                        crate::objects::ObjectType::GeoData(Box::new(obj)),
                     );
                 }
                 OBJ_SPATIALFILTER => {
@@ -7013,7 +7013,7 @@ impl DwgDocumentBuilder {
                     obj.clip_bound_transform = matrix_from_dxf_4x3(&data.clip_bound_transform);
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::SpatialFilter(obj),
+                        crate::objects::ObjectType::SpatialFilter(Box::new(obj)),
                     );
                 }
                 OBJ_BLOCKVISIBILITYPARAMETER => {
@@ -7025,7 +7025,7 @@ impl DwgDocumentBuilder {
                         .insert(Handle::from(handle), param.clone());
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::BlockVisibilityParameter(param),
+                        crate::objects::ObjectType::BlockVisibilityParameter(Box::new(param)),
                     );
                 }
                 OBJ_BLOCKREPRESENTATIONDATA => {
@@ -7037,7 +7037,7 @@ impl DwgDocumentBuilder {
                     document.objects.insert(
                         Handle::from(handle),
                         crate::objects::ObjectType::DynamicBlock(
-                            crate::objects::DynamicBlockObject {
+                            Box::new(crate::objects::DynamicBlockObject {
                                 handle: Handle::from(handle),
                                 owner: owner_handle,
                                 reactors: non_entity_data
@@ -7060,7 +7060,7 @@ impl DwgDocumentBuilder {
                                             block,
                                         },
                                     ),
-                            },
+                            }),
                         ),
                     );
                 }
@@ -7084,7 +7084,7 @@ impl DwgDocumentBuilder {
                     );
                     document.objects.insert(
                         Handle::from(handle),
-                        crate::objects::ObjectType::Field(data),
+                        crate::objects::ObjectType::Field(Box::new(data)),
                     );
                 }
                 OBJ_FIELDLIST => {
@@ -7134,7 +7134,7 @@ impl DwgDocumentBuilder {
                                 document.objects.insert(
                                     Handle::from(handle),
                                     crate::objects::ObjectType::Associative(
-                                        crate::objects::AssociativeObject {
+                                        Box::new(crate::objects::AssociativeObject {
                                             handle: Handle::from(handle),
                                             owner: owner_handle,
                                             reactors: non_entity_data
@@ -7156,7 +7156,7 @@ impl DwgDocumentBuilder {
                                             cpp_class_name,
                                             data,
                                             source_version: Some(document.version),
-                                        },
+                                        }),
                                     ),
                                 );
                                 return;
@@ -7203,7 +7203,7 @@ impl DwgDocumentBuilder {
                             document.objects.insert(
                                 Handle::from(handle),
                                 crate::objects::ObjectType::DynamicBlock(
-                                    crate::objects::DynamicBlockObject {
+                                    Box::new(crate::objects::DynamicBlockObject {
                                         handle: Handle::from(handle),
                                         owner: owner_handle,
                                         reactors: non_entity_data
@@ -7218,7 +7218,7 @@ impl DwgDocumentBuilder {
                                         dxf_name: dxf_name.to_string(),
                                         cpp_class_name,
                                         data,
-                                    },
+                                    }),
                                 ),
                             );
                             return;
@@ -7244,7 +7244,7 @@ impl DwgDocumentBuilder {
                                 document.objects.insert(
                                     Handle::from(handle),
                                     crate::objects::ObjectType::DynamicBlock(
-                                        crate::objects::DynamicBlockObject {
+                                        Box::new(crate::objects::DynamicBlockObject {
                                             handle: Handle::from(handle),
                                             owner: owner_handle,
                                             reactors: non_entity_data
@@ -7259,7 +7259,7 @@ impl DwgDocumentBuilder {
                                             dxf_name: dxf_name.to_string(),
                                             cpp_class_name,
                                             data,
-                                        },
+                                        }),
                                     ),
                                 );
                                 return;
@@ -7357,7 +7357,7 @@ impl DwgDocumentBuilder {
                             document.objects.insert(
                                 Handle::from(handle),
                                 crate::objects::ObjectType::RegisteredClass(
-                                    crate::objects::RegisteredClassObject {
+                                    Box::new(crate::objects::RegisteredClassObject {
                                         handle: Handle::from(handle),
                                         owner: owner_handle,
                                         reactors: non_entity_data
@@ -7381,7 +7381,7 @@ impl DwgDocumentBuilder {
                                         raw_dwg_data: Some(reader.raw_merged_data()),
                                         raw_dwg_handle_bits: reader.get_handle_bits(),
                                         raw_dwg_version: Some(document.version),
-                                    },
+                                    }),
                                 ),
                             );
                             return;
@@ -7432,7 +7432,7 @@ impl DwgDocumentBuilder {
                             document.objects.insert(
                                 Handle::from(handle),
                                 crate::objects::ObjectType::ClassObject(
-                                    crate::objects::ClassObject {
+                                    Box::new(crate::objects::ClassObject {
                                         handle: Handle::from(handle),
                                         owner: owner_handle,
                                         reactors: non_entity_data
@@ -7445,7 +7445,7 @@ impl DwgDocumentBuilder {
                                             .xdictionary_handle
                                             .map(Handle::from),
                                         data,
-                                    },
+                                    }),
                                 ),
                             );
                             return;
@@ -8169,7 +8169,7 @@ impl DwgDocumentBuilder {
                         };
                         document.objects.insert(
                             Handle::from(handle),
-                            crate::objects::ObjectType::ObjectContextData(object),
+                            crate::objects::ObjectType::ObjectContextData(Box::new(object)),
                         );
                     } else {
                         // Non-modeled context leaf: still capture its annotation
