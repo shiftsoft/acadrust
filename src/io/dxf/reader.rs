@@ -44,8 +44,11 @@ pub struct DxfReaderConfiguration {
     /// OBJECTS section are left out of the read.
     ///
     /// Only names the CLASSES section declares as non-entity classes are
-    /// skipped, as in [`crate::DwgReadOptions::skip_object_classes`];
-    /// [`crate::io::read::ReadStats::skipped_object_classes`] counts them.
+    /// skipped, as in [`crate::DwgReadOptions::skip_object_classes`]: a
+    /// proxy object standing for such a class is left out too, and the
+    /// dictionaries leave out their entries naming a skipped record of the
+    /// class itself. [`crate::io::read::ReadStats::skipped_object_classes`]
+    /// and [`crate::io::read::ReadStats::skipped_proxy_objects`] count them.
     ///
     /// Default: empty.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -225,6 +228,7 @@ impl DxfReader {
         let mut diagnostics = Vec::new();
         let mut file_classes = Vec::new();
         let mut skipped_object_classes = std::collections::BTreeMap::new();
+        let mut skipped_proxy_objects = std::collections::BTreeMap::new();
 
         loop {
             let pair = match self.reader.read_pair() {
@@ -348,6 +352,7 @@ impl DxfReader {
                                 &mut skipped_source_records,
                                 &mut diagnostics,
                                 &mut skipped_object_classes,
+                                &mut skipped_proxy_objects,
                             ),
                             "ACDSDATA" => self.read_acdsdata_section(&mut document),
                             "THUMBNAILIMAGE" => {
@@ -452,7 +457,8 @@ impl DxfReader {
 
         source_records = source_records
             .saturating_add(skipped_source_records)
-            .saturating_add(skipped_object_classes.values().sum::<usize>());
+            .saturating_add(skipped_object_classes.values().sum::<usize>())
+            .saturating_add(skipped_proxy_objects.values().sum::<usize>());
         let mut stats = crate::io::read::ReadStats::from_document(
             &document,
             SourceFormat::Dxf,
@@ -466,6 +472,7 @@ impl DxfReader {
             diagnostics,
         );
         stats.skipped_object_classes = skipped_object_classes;
+        stats.skipped_proxy_objects = skipped_proxy_objects;
         crate::document::sync_dimension_arrow_header(&mut document);
         document.source_path = self.source_path.take();
         crate::objects::restore_visual_style_roundtrip(&mut document);
@@ -560,6 +567,7 @@ impl DxfReader {
         skipped_records: &mut usize,
         diagnostics: &mut Vec<ReadDiagnostic>,
         skipped_object_classes: &mut std::collections::BTreeMap<String, usize>,
+        skipped_proxy_objects: &mut std::collections::BTreeMap<String, usize>,
     ) -> Result<()> {
         let mut section_reader = SectionReader::new(&mut self.reader)
             .with_failsafe(self.config.failsafe)
@@ -568,6 +576,9 @@ impl DxfReader {
         *decoded_records = decoded_records.saturating_add(section_reader.decoded_records());
         for (name, count) in section_reader.take_skipped_object_classes() {
             *skipped_object_classes.entry(name).or_default() += count;
+        }
+        for (name, count) in section_reader.take_skipped_proxy_objects() {
+            *skipped_proxy_objects.entry(name).or_default() += count;
         }
         Self::collect_section_recovery(
             &mut section_reader,

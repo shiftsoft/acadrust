@@ -517,6 +517,9 @@ struct Pass2Output {
     section_view_reps: Vec<Handle>,
     section_view_style: Option<crate::entities::SectionViewStyle>,
     warnings: Vec<(u64, String)>,
+    /// Proxy objects left out because their class is skipped, by class DXF
+    /// name.
+    skipped_proxy_objects: std::collections::BTreeMap<String, usize>,
 }
 
 impl Pass2Output {
@@ -549,6 +552,7 @@ impl Pass2Output {
             section_view_reps: Vec::new(),
             section_view_style: None,
             warnings: Vec::new(),
+            skipped_proxy_objects: std::collections::BTreeMap::new(),
         }
     }
 
@@ -573,6 +577,26 @@ impl Pass2Output {
         self.dgn_ls_components.remove(&handle);
         self.view_rep_refs.remove(&handle);
         self.section_view_reps.retain(|h| *h != handle);
+    }
+}
+
+/// The records the caller asked to leave out
+/// ([`DwgDocumentBuilder::set_skipped_object_classes`]).
+#[derive(Default)]
+struct SkippedRecords {
+    /// Class number to DXF name of each skipped class.
+    classes: HashMap<i16, String>,
+    /// Handles of the records stored with a skipped class's number. A
+    /// dictionary leaves out its entries that name one of them.
+    handles: HashSet<u64>,
+}
+
+impl SkippedRecords {
+    /// The skipped class a proxy object stands for, by the class number it
+    /// carries.
+    fn proxied_class(&self, class_id: i32) -> Option<&str> {
+        let number = i16::try_from(class_id).ok()?;
+        self.classes.get(&number).map(String::as_str)
     }
 }
 
@@ -647,6 +671,9 @@ pub struct DwgBuildOutcome {
     /// Records left out by [`DwgDocumentBuilder::set_skipped_object_classes`],
     /// by class DXF name. Not part of `skipped_records`.
     pub skipped_object_classes: std::collections::BTreeMap<String, usize>,
+    /// Proxy objects left out because the class they stand for is skipped,
+    /// by class DXF name. Not part of `skipped_records`.
+    pub skipped_proxy_objects: std::collections::BTreeMap<String, usize>,
 }
 
 /// Handle-to-name resolution maps built from table entries.
@@ -2259,31 +2286,38 @@ impl DwgDocumentBuilder {
         // Object classes the caller asked to leave out, by class number. Only
         // non-graphical classes qualify, so no entity, block or table record
         // goes missing. Their records stay in `record_catalog`: they exist in
-        // the source, and their handles must stay unused.
-        let skipped_classes: HashMap<i16, String> = document
-            .classes
-            .iter()
-            .filter(|class| {
-                class.class_number >= 500
-                    && !class.is_an_entity
-                    && self
-                        .skip_object_classes
-                        .iter()
-                        .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
-            })
-            .map(|class| (class.class_number, class.dxf_name.clone()))
-            .collect();
+        // the source, and their handles must stay unused. A proxy object
+        // standing for one of these classes is left out too, in pass 2, once
+        // its class number is read.
+        let mut skipped = SkippedRecords {
+            classes: document
+                .classes
+                .iter()
+                .filter(|class| {
+                    class.class_number >= 500
+                        && !class.is_an_entity
+                        && self
+                            .skip_object_classes
+                            .iter()
+                            .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
+                })
+                .map(|class| (class.class_number, class.dxf_name.clone()))
+                .collect(),
+            handles: HashSet::new(),
+        };
         let mut skipped_object_classes = std::collections::BTreeMap::<String, usize>::new();
-        for (_, _, raw_type_code, _) in &record_catalog {
-            if let Some(name) = skipped_classes.get(raw_type_code) {
+        for (handle, _, raw_type_code, _) in &record_catalog {
+            if let Some(name) = skipped.classes.get(raw_type_code) {
                 *skipped_object_classes.entry(name.clone()).or_default() += 1;
+                skipped.handles.insert(*handle);
             }
         }
+        let mut skipped_proxy_objects = std::collections::BTreeMap::<String, usize>::new();
         // Pass 2 reads every catalogued record but the table records and the
         // skipped classes. It walks the catalog itself: a filtered copy would
         // hold 24 bytes per record through the whole pass.
         let in_pass2 = |&(_, _, raw_type_code, type_code): &(u64, usize, i16, i16)| {
-            !skipped_classes.contains_key(&raw_type_code) && !is_table_type(type_code)
+            !skipped.classes.contains_key(&raw_type_code) && !is_table_type(type_code)
         };
         let pass2_count = record_catalog.iter().filter(|r| in_pass2(r)).count();
         // LIGHT's optional IES/photometric tail is controlled by the
@@ -2428,6 +2462,7 @@ impl DwgDocumentBuilder {
                             &entity_class_numbers,
                             &class_names,
                             photometric_lighting,
+                            &skipped,
                         );
                     }));
                     if let Some(message) = reader
@@ -2621,6 +2656,9 @@ impl DwgDocumentBuilder {
                     document.section_view_style = chunk.output.section_view_style.take();
                 }
                 document.objects.extend(chunk.output.objects.drain());
+                for (name, count) in std::mem::take(&mut chunk.output.skipped_proxy_objects) {
+                    *skipped_proxy_objects.entry(name).or_default() += count;
+                }
                 entity_next_handles.extend(chunk.output.entity_next_handles.drain());
                 if let Some(visit) = visit.as_deref_mut() {
                     accept_loaded_entity_batch(document, visit, &mut chunk.output.entities);
@@ -4087,6 +4125,7 @@ impl DwgDocumentBuilder {
                 .saturating_add(skipped_pass2 as usize),
             diagnostics,
             skipped_object_classes,
+            skipped_proxy_objects,
         }
     }
 
@@ -4237,6 +4276,7 @@ impl DwgDocumentBuilder {
         entity_class_numbers: &std::collections::HashSet<i16>,
         class_names: &ClassNames,
         photometric_lighting: bool,
+        skipped: &SkippedRecords,
     ) {
         // For class-based types (≥500) that weren't resolved via the class
         // map, check the class's is_an_entity flag.  This prevents misreading
@@ -6186,7 +6226,15 @@ impl DwgDocumentBuilder {
                     );
                 }
                 OBJ_DICTIONARY => {
-                    let data = objects::read_dictionary(&mut reader, self.obj_reader.version());
+                    // An entry naming a skipped record is dropped as it is
+                    // read: a drawing converted from MicroStation names
+                    // every one of its 600,000 line-style records in one
+                    // dictionary.
+                    let data = objects::read_dictionary_where(
+                        &mut reader,
+                        self.obj_reader.version(),
+                        |entry| !skipped.handles.contains(&entry),
+                    );
                     let mut obj = crate::objects::Dictionary::new();
                     obj.handle = Handle::from(handle);
                     obj.owner = owner_handle;
@@ -6205,7 +6253,9 @@ impl DwgDocumentBuilder {
                     );
                 }
                 OBJ_DICTIONARYWDFLT => {
-                    let data = objects::read_dictionary_with_default(&mut reader);
+                    let data = objects::read_dictionary_with_default_where(&mut reader, |entry| {
+                        !skipped.handles.contains(&entry)
+                    });
                     let mut obj = crate::objects::DictionaryWithDefault::new();
                     obj.handle = Handle::from(handle);
                     obj.owner = owner_handle;
@@ -6763,6 +6813,14 @@ impl DwgDocumentBuilder {
                 }
                 OBJ_PROXY_OBJECT => {
                     let class_id = reader.read_bit_long();
+                    if let Some(name) = skipped.proxied_class(class_id) {
+                        document.discard_record(Handle::from(handle));
+                        *document
+                            .skipped_proxy_objects
+                            .entry(name.to_owned())
+                            .or_default() += 1;
+                        return;
+                    }
                     let dxf_subclass = if self.obj_reader.dxf_version()
                         > crate::types::DxfVersion::AC1015
                     {
