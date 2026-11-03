@@ -187,7 +187,7 @@ fn synth_roundtrip_leaf(
         kind,
     };
     doc.objects
-        .insert(leaf_h, ObjectType::ObjectContextData(ctx));
+        .insert(leaf_h, ObjectType::ObjectContextData(Box::new(ctx)));
 
     let rt = roundtrip(&doc);
     let (h, c) = rt

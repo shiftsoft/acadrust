@@ -256,7 +256,7 @@ fn assert_plot_view_reference_types(standalone: bool) {
                 settings.plot_view_name = supplied_name.to_string();
                 let handle = settings.handle;
                 doc.objects
-                    .insert(handle, ObjectType::PlotSettings(settings));
+                    .insert(handle, ObjectType::PlotSettings(Box::new(settings)));
                 if let Some(ObjectType::Dictionary(root)) =
                     doc.objects.get_mut(&doc.header.named_objects_dict_handle)
                 {

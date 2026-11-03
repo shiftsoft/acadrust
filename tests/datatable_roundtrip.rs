@@ -19,10 +19,10 @@ fn table(document: &CadDocument) -> &DataTable {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::DataTable(table),
-                ..
-            }) => Some(table),
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::DataTable(table) => Some(table),
+                _ => None,
+            },
             _ => None,
         })
         .expect("DATATABLE must remain a native object")
@@ -48,10 +48,8 @@ fn table_handle(document: &CadDocument) -> Handle {
         .find(|(_, object)| {
             matches!(
                 object,
-                ObjectType::ClassObject(ClassObject {
-                    data: ClassObjectData::DataTable(_),
-                    ..
-                })
+                ObjectType::ClassObject(object)
+                    if matches!(object.data, ClassObjectData::DataTable(_))
             )
         })
         .unwrap()
@@ -106,13 +104,11 @@ fn reads_native_autocad_datatable_in_both_formats() {
 fn edited_native_datatable_survives_dwg_and_both_dxf_encodings() {
     let mut document = native_document(true);
     for object in document.objects.values_mut() {
-        if let ObjectType::ClassObject(ClassObject {
-            data: ClassObjectData::DataTable(table),
-            ..
-        }) = object
-        {
-            table.columns[0].rows[0].point = Vector3::new(-8.25, 0.0, 12.5);
-            table.columns[1].rows[0].handle = document.text_styles.handle();
+        if let ObjectType::ClassObject(object) = object {
+            if let ClassObjectData::DataTable(table) = &mut object.data {
+                table.columns[0].rows[0].point = Vector3::new(-8.25, 0.0, 12.5);
+                table.columns[1].rows[0].handle = document.text_styles.handle();
+            }
         }
     }
     let expected = table(&document).clone();
@@ -159,7 +155,7 @@ fn object_id_cells_follow_handle_collision_repairs() {
     target.handle = old_handle;
     document
         .objects
-        .insert(old_handle, ObjectType::ClassObject(target));
+        .insert(old_handle, ObjectType::ClassObject(Box::new(target)));
     let mut object = ClassObject::new(ClassObjectData::DataTable(DataTable {
         row_count: 1,
         columns: (5..=9)
@@ -177,17 +173,17 @@ fn object_id_cells_follow_handle_collision_repairs() {
     object.handle = Handle::new(0x1235);
     document
         .objects
-        .insert(object.handle, ObjectType::ClassObject(object));
+        .insert(object.handle, ObjectType::ClassObject(Box::new(object)));
 
     document.resolve_references();
     let repaired = document
         .objects
         .iter()
         .find_map(|(handle, object)| match object {
-            ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::LayerFilter(_),
-                ..
-            }) => Some(*handle),
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::LayerFilter(_) => Some(*handle),
+                _ => None,
+            },
             _ => None,
         })
         .unwrap();
@@ -213,7 +209,7 @@ fn writers_reject_unsupported_cells_and_inconsistent_row_counts() {
         object.handle = document.allocate_handle();
         document
             .objects
-            .insert(object.handle, ObjectType::ClassObject(object));
+            .insert(object.handle, ObjectType::ClassObject(Box::new(object)));
         assert!(DwgWriter::write_to_vec(&document).is_err());
         assert!(DxfWriter::new(&document).write_to_vec().is_err());
     }

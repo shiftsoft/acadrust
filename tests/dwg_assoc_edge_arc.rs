@@ -30,14 +30,14 @@ fn encode(version: DxfVersion, edge: &AssocEdgeActionParam) -> Vec<u8> {
     let handle = document.allocate_handle();
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner: document.header.named_objects_dict_handle,
             dxf_name: "ASSOCEDGEACTIONPARAM".to_string(),
             cpp_class_name: "AcDbAssocEdgeActionParam".to_string(),
             data: AssociativeData::EdgeActionParam(edge.clone()),
             ..Default::default()
-        }),
+        })),
     );
     DwgWriter::write_to_vec(&document).expect("write synthetic edge")
 }
@@ -57,10 +57,10 @@ fn round_trip(version: DxfVersion, edge: &AssocEdgeActionParam) {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::EdgeActionParam(value),
-                ..
-            }) => Some(value),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::EdgeActionParam(value) => Some(value),
+                _ => None,
+            },
             _ => None,
         });
     assert_eq!(actual, Some(edge));
@@ -121,10 +121,13 @@ fn decoded_edge(version: DxfVersion, edge: &AssocEdgeActionParam) -> Option<Asso
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::EdgeActionParam(value),
-                ..
-            }) => Some(value.clone()),
+            ObjectType::Associative(object) => match object.as_ref() {
+                AssociativeObject {
+                    data: AssociativeData::EdgeActionParam(value),
+                    ..
+                } => Some(value.clone()),
+                _ => None,
+            },
             _ => None,
         })
 }
@@ -137,10 +140,8 @@ fn assert_rejected(version: DxfVersion, edge: &AssocEdgeActionParam, what: &str)
         assert!(
             !outcome.document.objects.values().any(|object| matches!(
                 object,
-                ObjectType::Associative(AssociativeObject {
-                    data: AssociativeData::EdgeActionParam(_),
-                    ..
-                })
+                ObjectType::Associative(object)
+                    if matches!(object.data, AssociativeData::EdgeActionParam(_))
             )),
             "{what}: {version:?} decoded as a typed edge"
         );

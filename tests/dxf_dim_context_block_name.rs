@@ -61,7 +61,7 @@ fn document() -> (CadDocument, Handle, Handle) {
             },
         }),
     };
-    doc.objects.insert(leaf, ObjectType::ObjectContextData(ctx));
+    doc.objects.insert(leaf, ObjectType::ObjectContextData(Box::new(ctx)));
     (doc, leaf, block)
 }
 
@@ -97,10 +97,10 @@ fn group2_line(text: &str, leaf: Handle) -> usize {
 
 fn block_of(doc: &CadDocument, leaf: Handle) -> Handle {
     match doc.objects.get(&leaf) {
-        Some(ObjectType::ObjectContextData(ObjectContextData {
-            kind: ObjectContextKind::Dim(d),
-            ..
-        })) => d.block,
+        Some(ObjectType::ObjectContextData(context)) => match &context.kind {
+            ObjectContextKind::Dim(d) => d.block,
+            other => panic!("context lost: {other:?}"),
+        },
         other => panic!("context lost: {other:?}"),
     }
 }

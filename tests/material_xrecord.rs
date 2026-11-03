@@ -39,7 +39,7 @@ fn resolves_checker_asset_records_into_material_maps() {
 
     document
         .objects
-        .insert(material_handle, ObjectType::Material(material));
+        .insert(material_handle, ObjectType::Material(Box::new(material)));
     document
         .objects
         .insert(dictionary_handle, ObjectType::Dictionary(dictionary));

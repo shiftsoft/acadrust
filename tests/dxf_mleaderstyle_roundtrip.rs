@@ -82,7 +82,7 @@ fn mleaderstyle_colours_round_trip_through_dxf() {
     style.block_content_color = Color::Index(3);
     let handle = style.handle;
     doc.objects
-        .insert(handle, ObjectType::MultiLeaderStyle(style));
+        .insert(handle, ObjectType::MultiLeaderStyle(Box::new(style)));
 
     let bytes = DxfWriter::new(&doc).write_to_vec().expect("write dxf");
     let back = DxfReader::from_reader(Cursor::new(bytes))
@@ -119,7 +119,7 @@ fn style_round_trip(
     style.owner_handle = doc.header.named_objects_dict_handle;
     let handle = style.handle;
     doc.objects
-        .insert(handle, ObjectType::MultiLeaderStyle(style));
+        .insert(handle, ObjectType::MultiLeaderStyle(Box::new(style)));
     let bytes = DxfWriter::new(&doc).write_to_vec().expect("write dxf");
     let text = String::from_utf8(bytes.clone()).unwrap();
     let back = DxfReader::from_reader(Cursor::new(bytes))
@@ -127,7 +127,7 @@ fn style_round_trip(
         .read()
         .expect("read dxf");
     match back.objects.get(&handle) {
-        Some(ObjectType::MultiLeaderStyle(s)) => (text, s.clone()),
+        Some(ObjectType::MultiLeaderStyle(s)) => (text, (**s).clone()),
         other => panic!("MLEADERSTYLE lost: {other:?}"),
     }
 }
@@ -193,7 +193,7 @@ fn mleaderstyles_are_named_from_their_dictionary_keys() {
     annotative.is_annotative = true;
     let annotative_handle = annotative.handle;
     doc.objects
-        .insert(annotative_handle, ObjectType::MultiLeaderStyle(annotative));
+        .insert(annotative_handle, ObjectType::MultiLeaderStyle(Box::new(annotative)));
     if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&dictionary) {
         d.entries.push(("Annotative".into(), annotative_handle));
     }

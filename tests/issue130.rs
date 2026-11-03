@@ -271,7 +271,7 @@ fn table_content_objects_project_merged_ranges_on_cells_when_loaded() {
         let handle = content.common.handle;
         document
             .objects
-            .insert(handle, ObjectType::TableContent(content));
+            .insert(handle, ObjectType::TableContent(Box::new(content)));
         let loaded = dwg_roundtrip(&document);
         let Some(ObjectType::TableContent(content)) = loaded.objects.get(&handle) else {
             panic!("TABLECONTENT object missing after DWG read");

@@ -52,7 +52,7 @@ fn document_with(definition: &str) -> CadDocument {
     geo.coordinate_type = 2;
     geo.design_point = Vector3::new(155_000.0, 463_000.0, 0.0);
     geo.coordinate_system_definition = definition.to_string();
-    doc.objects.insert(handle, ObjectType::GeoData(geo));
+    doc.objects.insert(handle, ObjectType::GeoData(Box::new(geo)));
     if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&dict) {
         d.add_entry(GEO_KEY, handle);
     }
