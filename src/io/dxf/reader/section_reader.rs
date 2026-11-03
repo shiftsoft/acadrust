@@ -1531,6 +1531,9 @@ pub struct SectionReader<'a> {
     skip_object_classes: Vec<String>,
     /// Records left out by `skip_object_classes`, by class DXF name.
     skipped_object_classes: std::collections::BTreeMap<String, usize>,
+    /// Proxy objects left out because their class is skipped, by class DXF
+    /// name.
+    skipped_proxy_objects: std::collections::BTreeMap<String, usize>,
 }
 
 /// A record-level error recovered by a section reader.
@@ -1551,6 +1554,7 @@ impl<'a> SectionReader<'a> {
             recovery_errors: Vec::new(),
             skip_object_classes: Vec::new(),
             skipped_object_classes: std::collections::BTreeMap::new(),
+            skipped_proxy_objects: std::collections::BTreeMap::new(),
         }
     }
 
@@ -1574,6 +1578,10 @@ impl<'a> SectionReader<'a> {
 
     pub fn take_skipped_object_classes(&mut self) -> std::collections::BTreeMap<String, usize> {
         std::mem::take(&mut self.skipped_object_classes)
+    }
+
+    pub fn take_skipped_proxy_objects(&mut self) -> std::collections::BTreeMap<String, usize> {
+        std::mem::take(&mut self.skipped_proxy_objects)
     }
 
     pub fn skipped_records(&self) -> usize {
@@ -6964,7 +6972,9 @@ impl<'a> SectionReader<'a> {
         // causes phantom layouts with stale block_record handles and
         // orphaned dictionary entries.
         document.objects.clear();
-        let skipped_classes: Vec<String> = document
+        // Skipped classes by DXF name and class number: a proxy object names
+        // the class it stands for by its number.
+        let skipped_classes: Vec<(i16, String)> = document
             .classes
             .iter()
             .filter(|class| {
@@ -6974,8 +6984,11 @@ impl<'a> SectionReader<'a> {
                         .iter()
                         .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
             })
-            .map(|class| class.dxf_name.clone())
+            .map(|class| (class.class_number, class.dxf_name.clone()))
             .collect();
+        // Handles of the skipped records of those classes, whose entries the
+        // dictionaries leave out once the section is read.
+        let mut skipped_handles = std::collections::HashSet::new();
 
         while let Some(pair) = self.read_section_pair()? {
             if pair.code == 0 && pair.value_string == "ENDSEC" {
@@ -6983,15 +6996,18 @@ impl<'a> SectionReader<'a> {
             }
 
             if pair.code == 0 {
-                if let Some(name) = skipped_classes
+                if let Some((_, name)) = skipped_classes
                     .iter()
-                    .find(|name| name.eq_ignore_ascii_case(&pair.value_string))
+                    .find(|(_, name)| name.eq_ignore_ascii_case(&pair.value_string))
                 {
                     *self.skipped_object_classes.entry(name.clone()).or_default() += 1;
-                    self.skip_entity()?;
+                    if let Some(handle) = self.skip_record()? {
+                        skipped_handles.insert(handle);
+                    }
                     continue;
                 }
                 let before = document.objects.len();
+                let mut dropped_proxy = None;
                 self.reader.record_xdata(true);
                 let result: Result<()> = (|| {
                     match pair.value_string.as_str() {
@@ -7304,6 +7320,14 @@ impl<'a> SectionReader<'a> {
                         "ACAD_PROXY_OBJECT" => {
                             let object = self.read_proxy_object_dxf()?;
                             let handle = object.handle;
+                            if let Some((_, name)) = skipped_classes
+                                .iter()
+                                .find(|(number, _)| i32::from(*number) == object.class_id)
+                            {
+                                *self.skipped_proxy_objects.entry(name.clone()).or_default() += 1;
+                                dropped_proxy = Some(handle);
+                                return Ok(());
+                            }
                             let object_type = if let Some(envelope) =
                                 crate::objects::semantic_property::decode_registered_class_envelope(
                                     &object.payload,
@@ -7380,8 +7404,13 @@ impl<'a> SectionReader<'a> {
                     .decoded_records
                     .saturating_add(document.objects.len().saturating_sub(before));
                 self.read_object_xdata(document, false)?;
+                if let Some(handle) = dropped_proxy {
+                    document.object_xdata.remove(&handle);
+                    document.reactors_by_handle.remove(&handle);
+                }
             }
         }
+        drop_dictionary_entries(document, &skipped_handles);
 
         let viewport_handles_by_block: std::collections::HashMap<Handle, Vec<Handle>> = document
             .block_records
@@ -11990,6 +12019,23 @@ impl<'a> SectionReader<'a> {
     }
 
     /// Skip all pairs for the current entity until the next entity (code 0) or section end
+    /// Skips a record, returning its handle (group 5) when it has one.
+    fn skip_record(&mut self) -> Result<Option<Handle>> {
+        let mut handle = None;
+        while let Some(pair) = self.reader.read_pair()? {
+            if pair.code == 0 {
+                self.reader.push_back(pair);
+                break;
+            }
+            if pair.code == 5 && handle.is_none() {
+                handle = u64::from_str_radix(pair.value_string.trim(), 16)
+                    .ok()
+                    .map(Handle::new);
+            }
+        }
+        Ok(handle)
+    }
+
     fn skip_entity(&mut self) -> Result<()> {
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
@@ -22434,6 +22480,43 @@ fn color_from_i32(v: i32) -> Color {
             g: ((v >> 8) & 0xFF) as u8,
             b: (v & 0xFF) as u8,
         },
+    }
+}
+
+/// Takes out of every dictionary the entries naming a skipped record, so the
+/// document holds no entry for a record the read left out.
+fn drop_dictionary_entries(
+    document: &mut CadDocument,
+    skipped: &std::collections::HashSet<Handle>,
+) {
+    if skipped.is_empty() {
+        return;
+    }
+    for object in document.objects.values_mut() {
+        match object {
+            ObjectType::Dictionary(dictionary) => {
+                let before = dictionary.entries.len();
+                dictionary
+                    .entries
+                    .retain(|(_, handle)| !skipped.contains(handle));
+                if dictionary.entries.len() != before && !dictionary.hard_owner_entries.is_empty() {
+                    let kept: std::collections::HashSet<&str> = dictionary
+                        .entries
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect();
+                    let mut hard_owner_entries = std::mem::take(&mut dictionary.hard_owner_entries);
+                    hard_owner_entries.retain(|name| kept.contains(name.as_str()));
+                    dictionary.hard_owner_entries = hard_owner_entries;
+                }
+            }
+            ObjectType::DictionaryWithDefault(dictionary) => {
+                dictionary
+                    .entries
+                    .retain(|(_, handle)| !skipped.contains(handle));
+            }
+            _ => {}
+        }
     }
 }
 

@@ -28,10 +28,13 @@
   `DxfReaderConfiguration::skip_object_classes` name non-graphical object
   classes whose records are neither decoded nor stored, such as the DGN
   line-style classes, of which a drawing converted from MicroStation can
-  hold hundreds of thousands. References to a skipped record are kept as
-  they are. `ReadStats::skipped_object_classes` counts the skipped records by
-  class, and `DwgReader::read_visiting_with_stats` returns those statistics
-  for a visiting read. Empty by default, which reads everything as before.
+  hold hundreds of thousands. A proxy object (`ACAD_PROXY_OBJECT`) standing
+  for such a class is left out too, and a dictionary leaves out its entries
+  naming a skipped record of the class itself; other references to a skipped
+  record are kept as they are. `ReadStats::skipped_object_classes` and
+  `ReadStats::skipped_proxy_objects` count the skipped records by class, and
+  `DwgReader::read_visiting_with_stats` returns those statistics for a
+  visiting read. Empty by default, which reads everything as before.
 - **Custom drawing property fields** - `%<\AcVar CustomDP.<Name>>%`, the code
   AutoCAD writes for a custom drawing property, resolves to the property's
   stored text verbatim (name matched case-insensitively). It used to fall

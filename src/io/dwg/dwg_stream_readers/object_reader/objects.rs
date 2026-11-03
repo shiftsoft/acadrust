@@ -778,6 +778,17 @@ fn clean_dict_key(name: String) -> String {
 }
 
 pub fn read_dictionary(reader: &mut DwgMergedReader, version: DwgVersion) -> DictionaryData {
+    read_dictionary_where(reader, version, |_| true)
+}
+
+/// Like [`read_dictionary`], keeping only the entries whose handle `keep`
+/// accepts. The others are read and dropped one by one, so a dictionary of
+/// many unwanted entries never holds them all.
+pub fn read_dictionary_where(
+    reader: &mut DwgMergedReader,
+    version: DwgVersion,
+    mut keep: impl FnMut(u64) -> bool,
+) -> DictionaryData {
     let num_entries = safe_count(reader.read_bit_long(), reader);
 
     let mut duplicate_cloning = 0i16;
@@ -793,8 +804,11 @@ pub fn read_dictionary(reader: &mut DwgMergedReader, version: DwgVersion) -> Dic
     for _ in 0..num_entries {
         let name = clean_dict_key(reader.read_variable_text());
         let handle = reader.read_handle();
-        entries.push(DictionaryEntry { name, handle });
+        if keep(handle) {
+            entries.push(DictionaryEntry { name, handle });
+        }
     }
+    entries.shrink_to_fit();
 
     DictionaryData {
         duplicate_cloning,
@@ -804,6 +818,15 @@ pub fn read_dictionary(reader: &mut DwgMergedReader, version: DwgVersion) -> Dic
 }
 
 pub fn read_dictionary_with_default(reader: &mut DwgMergedReader) -> DictionaryWithDefaultData {
+    read_dictionary_with_default_where(reader, |_| true)
+}
+
+/// Like [`read_dictionary_with_default`], keeping only the entries whose
+/// handle `keep` accepts.
+pub fn read_dictionary_with_default_where(
+    reader: &mut DwgMergedReader,
+    mut keep: impl FnMut(u64) -> bool,
+) -> DictionaryWithDefaultData {
     let num_entries = safe_count(reader.read_bit_long(), reader);
     let duplicate_cloning = reader.read_bit_short();
     let hard_owner = reader.read_byte() != 0;
@@ -812,8 +835,11 @@ pub fn read_dictionary_with_default(reader: &mut DwgMergedReader) -> DictionaryW
     for _ in 0..num_entries {
         let name = clean_dict_key(reader.read_variable_text());
         let handle = reader.read_handle();
-        entries.push(DictionaryEntry { name, handle });
+        if keep(handle) {
+            entries.push(DictionaryEntry { name, handle });
+        }
     }
+    entries.shrink_to_fit();
 
     let default_handle = reader.read_handle();
 
