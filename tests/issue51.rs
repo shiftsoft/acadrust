@@ -660,7 +660,7 @@ fn supported_assoc_objects_are_written() {
     assoc.handle = assoc_handle;
     assoc.owner = nod_handle;
     doc.objects
-        .insert(assoc_handle, ObjectType::Associative(assoc));
+        .insert(assoc_handle, ObjectType::Associative(Box::new(assoc)));
 
     if let Some(ObjectType::Dictionary(nod)) = doc.objects.get_mut(&nod_handle) {
         nod.add_entry("ACDBASSOC2DCONSTRAINTGROUP", assoc_handle);

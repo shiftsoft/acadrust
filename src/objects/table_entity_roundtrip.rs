@@ -238,7 +238,7 @@ pub(crate) fn prepare_table_entity_roundtrip(document: &mut std::borrow::Cow<'_,
                 placeholder.common.reactors = vec![record];
                 document
                     .objects
-                    .insert(content, ObjectType::TableContent(placeholder));
+                    .insert(content, ObjectType::TableContent(Box::new(placeholder)));
                 content
             }
         };
@@ -248,7 +248,7 @@ pub(crate) fn prepare_table_entity_roundtrip(document: &mut std::borrow::Cow<'_,
             written.common.owner_handle = object.common.owner_handle;
             written.common.reactors = object.common.reactors.clone();
             written.common.xdictionary_handle = object.common.xdictionary_handle;
-            *object = *written;
+            **object = *written;
         }
         let geometry = match roundtrip_geometry(document, handle) {
             Some(geometry) => geometry,

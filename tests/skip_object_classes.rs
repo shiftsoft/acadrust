@@ -168,6 +168,7 @@ fn fixture(version: DxfVersion) -> Fixture {
                 units_type: 0,
                 is_element: false,
                 is_physical: false,
+                undecoded_fields: None,
                 is_scale_independent: false,
                 is_snappable: false,
                 root_component: stroke,

@@ -42,10 +42,10 @@ impl CadDocument {
         };
         let graph = self.dynamic_dictionary_entry(dict, "ACAD_ENHANCEDBLOCK")?;
         match self.objects.get(&graph)? {
-            ObjectType::DynamicBlock(DynamicBlockObject {
-                data: DynamicBlockData::EvaluationGraph(graph),
-                ..
-            }) => Some(graph),
+            ObjectType::DynamicBlock(object) => match &object.data {
+                DynamicBlockData::EvaluationGraph(graph) => Some(graph),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -258,10 +258,14 @@ impl CadDocument {
                     if let Some(insert) = insert {
                         for action in graph.nodes.iter().filter_map(|n| {
                             match self.objects.get(&n.expression) {
-                                Some(ObjectType::DynamicBlock(DynamicBlockObject {
-                                    data: DynamicBlockData::FlipAction(a),
-                                    ..
-                                })) if a.action.dependencies.contains(&node.expression) => Some(a),
+                                Some(ObjectType::DynamicBlock(object)) => match &object.data {
+                                    DynamicBlockData::FlipAction(a)
+                                        if a.action.dependencies.contains(&node.expression) =>
+                                    {
+                                        Some(a)
+                                    }
+                                    _ => None,
+                                },
                                 _ => None,
                             }
                         }) {
@@ -345,10 +349,14 @@ impl CadDocument {
                         .nodes
                         .iter()
                         .filter_map(|n| match self.objects.get(&n.expression) {
-                            Some(ObjectType::DynamicBlock(DynamicBlockObject {
-                                data: DynamicBlockData::LookupAction(a),
-                                ..
-                            })) if a.action.element.eval.node_id == p.index => Some(a),
+                            Some(ObjectType::DynamicBlock(object)) => match &object.data {
+                                DynamicBlockData::LookupAction(a)
+                                    if a.action.element.eval.node_id == p.index =>
+                                {
+                                    Some(a)
+                                }
+                                _ => None,
+                            },
                             _ => None,
                         })
                         .next()

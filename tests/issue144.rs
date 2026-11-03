@@ -16,7 +16,8 @@ fn drawing() -> (CadDocument, Handle) {
         ..Default::default()
     });
     let handle = object.handle;
-    doc.objects.insert(handle, ObjectType::DynamicBlock(object));
+    doc.objects
+        .insert(handle, ObjectType::DynamicBlock(Box::new(object)));
     (doc, handle)
 }
 

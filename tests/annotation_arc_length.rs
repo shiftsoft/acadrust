@@ -95,7 +95,7 @@ fn fixture() -> CadDocument {
         };
         document
             .objects
-            .insert(handle, ObjectType::ObjectContextData(context));
+            .insert(handle, ObjectType::ObjectContextData(Box::new(context)));
         let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&contexts) else {
             panic!("context dictionary");
         };

@@ -283,11 +283,11 @@ fn storage_restore_keeps_serde_explicit_null_and_zero_edits() {
 
 #[test]
 fn storage_restore_keeps_serde_associative_provenance_edits() {
-    let source = ObjectType::Associative(AssociativeObject {
+    let source = ObjectType::Associative(Box::new(AssociativeObject {
         handle: Handle::new(42),
         source_version: Some(DxfVersion::AC1027),
         ..Default::default()
-    });
+    }));
     for version in [json!("AC1032"), Value::Null] {
         let mut edited_json = serde_json::to_value(&source).unwrap();
         edited_json["Associative"]["source_version"] = version.clone();

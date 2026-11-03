@@ -243,14 +243,14 @@ fn standalone_variable_handle_value_does_not_require_parameter_handles() {
     };
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner: document.header.named_objects_dict_handle,
             dxf_name: "ASSOCVARIABLE".to_string(),
             cpp_class_name: "AcDbAssocVariable".to_string(),
             data: AssociativeData::Variable(variable.clone()),
             ..Default::default()
-        }),
+        })),
     );
 
     let bytes = DxfWriter::new(&document).write_to_vec().unwrap();
@@ -262,10 +262,10 @@ fn standalone_variable_handle_value_does_not_require_parameter_handles() {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::Variable(variable),
-                ..
-            }) => Some(variable),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::Variable(variable) => Some(variable),
+                _ => None,
+            },
             _ => None,
         })
         .unwrap();

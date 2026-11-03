@@ -98,7 +98,7 @@ fn dwg_constraint_group_counts_only_registered_nodes() {
     let owner = document.header.named_objects_dict_handle;
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner,
             dxf_name: "ASSOC2DCONSTRAINTGROUP".to_string(),
@@ -125,7 +125,7 @@ fn dwg_constraint_group_counts_only_registered_nodes() {
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
 
     let bytes = DwgWriter::write_to_vec(&document).expect("write DWG");
@@ -136,10 +136,10 @@ fn dwg_constraint_group_counts_only_registered_nodes() {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::ConstraintGroup(group),
-                ..
-            }) => Some(group),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::ConstraintGroup(group) => Some(group),
+                _ => None,
+            },
             _ => None,
         })
         .expect("constraint group should round-trip");
@@ -163,7 +163,7 @@ fn document_with_axis_and_rigid_set() -> CadDocument {
     transform[7] = -2.5;
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner,
             dxf_name: "ASSOC2DCONSTRAINTGROUP".to_string(),
@@ -273,7 +273,7 @@ fn document_with_axis_and_rigid_set() -> CadDocument {
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
     document
 }
@@ -283,10 +283,10 @@ fn assert_axis_and_rigid_set(document: &CadDocument) {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::ConstraintGroup(group),
-                ..
-            }) => Some(group),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::ConstraintGroup(group) => Some(group),
+                _ => None,
+            },
             _ => None,
         })
         .expect("constraint group should round-trip");

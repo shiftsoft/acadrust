@@ -15,7 +15,7 @@ fn document() -> (CadDocument, Handle) {
     let handle = document.allocate_handle();
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner: document.header.named_objects_dict_handle,
             dxf_name: "ASSOC2DCONSTRAINTGROUP".into(),
@@ -29,7 +29,7 @@ fn document() -> (CadDocument, Handle) {
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
     (document, handle)
 }
@@ -173,12 +173,12 @@ fn mental_ray_render_settings_survive_dxf_to_dwg_without_stream_shift() {
     };
     document.objects.insert(
         handle,
-        ObjectType::ClassObject(ClassObject {
+        ObjectType::ClassObject(Box::new(ClassObject {
             handle,
             owner,
             data: ClassObjectData::MentalRayRenderSettings(value.clone()),
             ..Default::default()
-        }),
+        })),
     );
 
     let dxf = DxfWriter::new(&document).write_to_vec().unwrap();

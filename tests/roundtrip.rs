@@ -2754,12 +2754,13 @@ fn build_annotative_document() -> CadDocument {
     mls.handle = doc.allocate_handle();
     mls.is_annotative = true;
     doc.objects
-        .insert(mls.handle, ObjectType::MultiLeaderStyle(mls));
+        .insert(mls.handle, ObjectType::MultiLeaderStyle(Box::new(mls)));
 
     let mut tbs = TableStyle::new("AnnoTS");
     tbs.handle = doc.allocate_handle();
     tbs.annotative = true;
-    doc.objects.insert(tbs.handle, ObjectType::TableStyle(tbs));
+    doc.objects
+        .insert(tbs.handle, ObjectType::TableStyle(Box::new(tbs)));
 
     doc
 }
@@ -3160,14 +3161,14 @@ fn dwg_roundtrip_edge_action_param_line() {
         curve: curve.clone(),
         ..Default::default()
     });
-    doc.objects.insert(handle, ObjectType::Associative(object));
+    doc.objects
+        .insert(handle, ObjectType::Associative(Box::new(object)));
 
     let read = dwg_roundtrip(&doc);
-    let Some(ObjectType::Associative(AssociativeObject {
-        data: AssociativeData::EdgeActionParam(edge),
-        ..
-    })) = read.objects.get(&handle)
-    else {
+    let Some(ObjectType::Associative(object)) = read.objects.get(&handle) else {
+        panic!("edge action parameter lost");
+    };
+    let AssociativeData::EdgeActionParam(edge) = &object.data else {
         panic!("edge action parameter lost");
     };
     assert_eq!(edge.action_type, 19);
@@ -3235,7 +3236,8 @@ fn scale_action_survives_dwg_and_dxf_roundtrips() {
     object.handle = handle;
     object.owner = doc.header.named_objects_dict_handle;
     object.data = data.clone();
-    doc.objects.insert(handle, ObjectType::DynamicBlock(object));
+    doc.objects
+        .insert(handle, ObjectType::DynamicBlock(Box::new(object)));
 
     for saved in [dwg_roundtrip(&doc), dxf_roundtrip(doc)] {
         let Some(ObjectType::DynamicBlock(object)) = saved.objects.get(&handle) else {
@@ -3287,7 +3289,8 @@ fn user_parameter_survives_dwg_and_dxf_roundtrips() {
     object.handle = handle;
     object.owner = doc.header.named_objects_dict_handle;
     object.data = data.clone();
-    doc.objects.insert(handle, ObjectType::DynamicBlock(object));
+    doc.objects
+        .insert(handle, ObjectType::DynamicBlock(Box::new(object)));
 
     for saved in [dwg_roundtrip(&doc), dxf_roundtrip(doc)] {
         let Some(ObjectType::DynamicBlock(object)) = saved.objects.get(&handle) else {
@@ -3349,7 +3352,8 @@ fn horizontal_constraint_parameter_survives_dwg_and_dxf_roundtrips() {
         object.handle = handle;
         object.owner = doc.header.named_objects_dict_handle;
         object.data = data.clone();
-        doc.objects.insert(handle, ObjectType::DynamicBlock(object));
+        doc.objects
+            .insert(handle, ObjectType::DynamicBlock(Box::new(object)));
         (doc, handle)
     };
 
@@ -3404,7 +3408,8 @@ fn vertex_action_param_survives_dwg_and_dxf_roundtrips() {
     object.handle = handle;
     object.owner = doc.header.named_objects_dict_handle;
     object.data = data.clone();
-    doc.objects.insert(handle, ObjectType::Associative(object));
+    doc.objects
+        .insert(handle, ObjectType::Associative(Box::new(object)));
 
     for saved in [dwg_roundtrip(&doc), dxf_roundtrip(doc)] {
         let Some(ObjectType::Associative(object)) = saved.objects.get(&handle) else {
