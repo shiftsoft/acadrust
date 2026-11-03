@@ -16,7 +16,7 @@ use acadrust::io::read::ReadOutcome;
 use acadrust::objects::{
     DgnLineStyleData, DgnLineStyleObject, DgnLsComponentData, DgnLsComponentType,
     DgnLsInternalComponent, DgnLsPhaseMode, DgnLsStroke, DgnLsStrokePattern, Dictionary,
-    ObjectType,
+    ObjectType, ProxyObject, ProxyPayload,
 };
 use acadrust::tables::LineType;
 use acadrust::types::{DxfVersion, Handle, Vector3};
@@ -266,8 +266,8 @@ fn skipped_dwg_classes_are_neither_decoded_nor_kept() {
             );
             assert_eq!(read.stats.source_records, full.stats.source_records);
             assert_eq!(document.notifications.error_count(), 0, "{context}");
-            // Everything else reads as before, and the references to the
-            // skipped records are kept as they are.
+            // Everything else reads as before. The dictionaries keep no
+            // entry for a skipped record.
             assert_eq!(
                 document.objects.len() + 3,
                 full.document.objects.len(),
@@ -275,19 +275,15 @@ fn skipped_dwg_classes_are_neither_decoded_nor_kept() {
             );
             assert!(document.get_entity(fixture.line).is_some(), "{context}");
             assert!(document.line_types.get("DGN_DASH").is_some(), "{context}");
-            assert_eq!(
-                entries(document, fixture.components),
-                entries(&full.document, fixture.components),
+            assert_eq!(entries(&full.document, fixture.components).len(), 2);
+            assert!(
+                entries(document, fixture.components).is_empty(),
                 "{context}"
             );
             let extension = document
                 .extension_dictionary_handle(fixture.linetype)
                 .expect("linetype extension dictionary");
-            assert_eq!(
-                entries(document, extension),
-                vec![("DGNLSDEF".to_string(), fixture.definition)],
-                "{context}"
-            );
+            assert!(entries(document, extension).is_empty(), "{context}");
             for handle in [fixture.definition, fixture.stroke, fixture.internal] {
                 assert!(!document.objects.contains_key(&handle), "{context}");
             }
@@ -461,15 +457,147 @@ fn skipped_dxf_classes_are_neither_decoded_nor_kept() {
         assert_eq!(read.stats.source_records, full.stats.source_records);
         assert_eq!(document.objects.len() + 3, full.document.objects.len());
         assert!(document.get_entity(fixture.line).is_some());
-        assert_eq!(
-            entries(document, fixture.components),
-            entries(&full.document, fixture.components)
-        );
+        assert_eq!(entries(&full.document, fixture.components).len(), 2);
+        assert!(entries(document, fixture.components).is_empty());
 
         // Entity names are not object classes.
         let read = read_dxf(&bytes, &["LINE", "DICTIONARY"]);
         assert!(read.stats.skipped_object_classes.is_empty());
         assert_eq!(read.document.objects.len(), full.document.objects.len());
         assert!(read.document.get_entity(fixture.line).is_some());
+    }
+}
+
+/// The fixture as read back with two proxy objects added: one standing for
+/// LSINTERNALCOMPONENT, one for LSDEFINITION, both named in the component
+/// dictionary. A drawing saved where the DGN classes were not loaded stores
+/// its line-style records that way.
+fn with_proxies(version: DxfVersion) -> (Fixture, CadDocument, Handle, Handle) {
+    let fixture = fixture(version);
+    let bytes = DwgWriter::write_to_vec(&fixture.document).unwrap();
+    let mut document = read_dwg(&bytes, DwgReadOptions::default()).document;
+    let class_id = |name: &str| {
+        document
+            .classes
+            .iter()
+            .find(|class| class.dxf_name == name)
+            .map(|class| i32::from(class.class_number))
+            .expect("class declared")
+    };
+    let (internal_class, definition_class) =
+        (class_id("LSINTERNALCOMPONENT"), class_id("LSDEFINITION"));
+    let mut proxies = Vec::new();
+    for (class_id, key) in [(internal_class, "{PROXY1}"), (definition_class, "{PROXY2}")] {
+        let handle = document.allocate_handle();
+        document.objects.insert(
+            handle,
+            ObjectType::ProxyObject(ProxyObject {
+                handle,
+                owner: fixture.components,
+                reactors: vec![fixture.components],
+                class_id,
+                payload: ProxyPayload::from_bytes(&[0xAB, 0xCD]),
+                ..ProxyObject::default()
+            }),
+        );
+        if let Some(ObjectType::Dictionary(store)) = document.objects.get_mut(&fixture.components) {
+            store.add_entry(key, handle);
+        }
+        proxies.push(handle);
+    }
+    (fixture, document, proxies[0], proxies[1])
+}
+
+fn proxies(document: &CadDocument) -> Vec<Handle> {
+    let mut handles: Vec<Handle> = document
+        .objects
+        .iter()
+        .filter(|(_, object)| matches!(object, ObjectType::ProxyObject(_)))
+        .map(|(handle, _)| *handle)
+        .collect();
+    handles.sort();
+    handles
+}
+
+fn entry_names(document: &CadDocument, dictionary: Handle) -> Vec<String> {
+    entries(document, dictionary)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+#[test]
+fn proxies_of_skipped_classes_are_left_out_too() {
+    let version = DxfVersion::AC1032;
+    let (fixture, document, skipped, kept) = with_proxies(version);
+    let bytes = DwgWriter::write_to_vec(&document).unwrap();
+    let full = read_dwg(&bytes, DwgReadOptions::default());
+    assert_eq!(proxies(&full.document), vec![skipped, kept], "fixture");
+    assert!(full.stats.skipped_proxy_objects.is_empty());
+
+    for failsafe in [false, true] {
+        let options = DwgReadOptions {
+            failsafe,
+            ..DwgReadOptions::default().with_skipped_object_classes(["LSINTERNALCOMPONENT"])
+        };
+        let read = read_dwg(&bytes, options);
+        let context = format!("failsafe={failsafe}");
+        assert_eq!(proxies(&read.document), vec![kept], "{context}");
+        assert_eq!(
+            read.stats.skipped_proxy_objects,
+            counts(&[("LSINTERNALCOMPONENT", 1)]),
+            "{context}"
+        );
+        assert_eq!(
+            read.stats.skipped_object_classes,
+            counts(&[("LSINTERNALCOMPONENT", 1)]),
+            "{context}"
+        );
+        assert_eq!(read.stats.skipped_source_records, 0, "{context}");
+        assert!(read.stats.diagnostics.is_empty(), "{context}");
+        assert_eq!(read.document.notifications.error_count(), 0, "{context}");
+        assert_eq!(
+            read.stats.decoded_source_records + 2,
+            full.stats.decoded_source_records,
+            "{context}"
+        );
+        // The entry of the native record goes; a proxy is known as skipped
+        // only once it is read, so the entry naming it stays.
+        assert_eq!(
+            entry_names(&read.document, fixture.components),
+            ["{STROKE}", "{PROXY1}", "{PROXY2}"],
+            "{context}"
+        );
+        assert!(read.document.get_entity(fixture.line).is_some());
+    }
+
+    for binary in [false, true] {
+        let mut dxf = Vec::new();
+        let writer = if binary {
+            DxfWriter::new_binary(&full.document)
+        } else {
+            DxfWriter::new(&full.document)
+        };
+        writer.write_to_writer(&mut dxf).unwrap();
+        let all = read_dxf(&dxf, &[]);
+        assert_eq!(
+            proxies(&all.document),
+            vec![skipped, kept],
+            "binary={binary}"
+        );
+        let read = read_dxf(&dxf, &["LSINTERNALCOMPONENT"]);
+        assert_eq!(proxies(&read.document), vec![kept], "binary={binary}");
+        assert_eq!(
+            read.stats.skipped_proxy_objects,
+            counts(&[("LSINTERNALCOMPONENT", 1)]),
+            "binary={binary}"
+        );
+        assert_eq!(read.stats.source_records, all.stats.source_records);
+        assert!(!read.document.object_xdata.contains_key(&skipped));
+        assert_eq!(
+            entry_names(&read.document, fixture.components),
+            ["{STROKE}", "{PROXY1}", "{PROXY2}"],
+            "binary={binary}"
+        );
     }
 }
