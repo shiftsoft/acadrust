@@ -644,6 +644,9 @@ pub struct DwgBuildOutcome {
     pub decoded_records: usize,
     pub skipped_records: usize,
     pub diagnostics: Vec<ReadDiagnostic>,
+    /// Records left out by [`DwgDocumentBuilder::set_skipped_object_classes`],
+    /// by class DXF name. Not part of `skipped_records`.
+    pub skipped_object_classes: std::collections::BTreeMap<String, usize>,
 }
 
 /// Handle-to-name resolution maps built from table entries.
@@ -767,6 +770,8 @@ pub struct DwgDocumentBuilder {
     failsafe: bool,
     /// See [`crate::DwgReadOptions::skip_roundtrip_data`].
     skip_roundtrip_data: bool,
+    /// DXF names of object classes whose records are not decoded.
+    skip_object_classes: Vec<String>,
     /// Notifications collected during building.
     notifications: NotificationCollection,
     /// Shared with `DwgReader`; reports the object-build portion of the
@@ -802,6 +807,7 @@ impl DwgDocumentBuilder {
             obj_reader,
             failsafe: false,
             skip_roundtrip_data: false,
+            skip_object_classes: Vec::new(),
             notifications: NotificationCollection::new(),
             progress: None,
         }
@@ -819,6 +825,12 @@ impl DwgDocumentBuilder {
     /// (see [`crate::DwgReadOptions::skip_roundtrip_data`]).
     pub fn set_skip_roundtrip_data(&mut self, skip: bool) {
         self.skip_roundtrip_data = skip;
+    }
+
+    /// Leave out the records of these non-graphical object classes, by DXF
+    /// name. See [`crate::DwgReadOptions::skip_object_classes`].
+    pub fn set_skipped_object_classes(&mut self, names: &[String]) {
+        self.skip_object_classes = names.to_vec();
     }
 
     pub fn set_progress_callback(&mut self, progress: std::sync::Arc<dyn Fn(u16) + Send + Sync>) {
@@ -2225,10 +2237,36 @@ impl DwgDocumentBuilder {
         // Pending attribute entities keyed by owner (INSERT) handle.
         let mut pending_attributes: HashMap<u64, Vec<AttributeEntity>> = HashMap::new();
         let mut entity_next_handles = HashMap::new();
+        // Object classes the caller asked to leave out, by class number. Only
+        // non-graphical classes qualify, so no entity, block or table record
+        // goes missing. Their records stay in `record_catalog`: they exist in
+        // the source, and their handles must stay unused.
+        let skipped_classes: HashMap<i16, &str> = document
+            .classes
+            .iter()
+            .filter(|class| {
+                class.class_number >= 500
+                    && !class.is_an_entity
+                    && self
+                        .skip_object_classes
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
+            })
+            .map(|class| (class.class_number, class.dxf_name.as_str()))
+            .collect();
+        let mut skipped_object_classes = std::collections::BTreeMap::<String, usize>::new();
         let pass2_records: Vec<(u64, usize, i16, i16)> = record_catalog
             .iter()
             .copied()
-            .filter(|(_, _, _, type_code)| !is_table_type(*type_code))
+            .filter(|(_, _, raw_type_code, type_code)| {
+                if let Some(name) = skipped_classes.get(raw_type_code) {
+                    *skipped_object_classes
+                        .entry((*name).to_string())
+                        .or_default() += 1;
+                    return false;
+                }
+                !is_table_type(*type_code)
+            })
             .collect();
         // LIGHT's optional IES/photometric tail is controlled by the
         // LIGHTINGUNITS entry in AcDbVariableDictionary, not by record length.
@@ -3995,6 +4033,7 @@ impl DwgDocumentBuilder {
                 .saturating_add(skipped_pass1 as usize)
                 .saturating_add(skipped_pass2 as usize),
             diagnostics,
+            skipped_object_classes,
         }
     }
 
