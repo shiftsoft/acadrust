@@ -224,7 +224,7 @@ fn source_state_diagnostics(document: &CadDocument, diagnostics: &mut Vec<ReadDi
         }
     }
 }
-use crate::io::dwg::parallel::{filter_map_slice, for_each_mut, map_chunks, map_mut, worker_count};
+use crate::io::dwg::parallel::{for_each_mut, map_chunks, map_mut, worker_count};
 use crate::io::read::{push_read_diagnostic, ReadDiagnostic, ReadStage};
 use crate::notification::{NotificationCollection, NotificationType};
 use crate::types::Handle;
@@ -1007,6 +1007,8 @@ impl DwgDocumentBuilder {
         // drawing order afterwards: the owned-handle list on R2004+, or the
         // next-entity chain on R13–R2000.
         handles.sort_unstable();
+        // Only the highest handle is needed once the records are catalogued.
+        let max_from_reader = handles.last().copied().unwrap_or(0);
         let mut skipped_pass1 = 0u32;
         let mut skipped_pass2 = 0u32;
         let mut decoded_pass2 = 0usize;
@@ -1069,82 +1071,104 @@ impl DwgDocumentBuilder {
             MissingOffset,
             NegativeOffset(i64),
             RecordType,
+            /// A record of an unused object type: not a failure, only named.
+            UnusedType(i16),
         }
-        type CatalogResult =
-            std::result::Result<(u64, usize, i16, i16), (u64, Option<u64>, CatalogFailure)>;
-        let catalog_results: Vec<CatalogResult> = filter_map_slice(&handles, |&handle| {
-            let Some(offset) = self.obj_reader.offset_for(handle) else {
-                return Some(Err((handle, None, CatalogFailure::MissingOffset)));
-            };
-            if offset < 0 {
-                return Some(Err((handle, None, CatalogFailure::NegativeOffset(offset))));
-            }
-            let source_offset = offset as usize;
-            let raw = match self.obj_reader.type_code_at(source_offset) {
-                Ok(raw) => raw,
-                Err(_error) => {
-                    return Some(Err((
-                        handle,
-                        Some(source_offset as u64),
-                        CatalogFailure::RecordType,
-                    )));
-                }
-            };
-            Some(Ok((
-                handle,
-                source_offset,
-                raw,
-                Self::resolve_type_code(raw, &class_map),
-            )))
-        });
-        let mut record_catalog = Vec::with_capacity(catalog_results.len());
-        let mut skipped_catalog = 0usize;
-        let mut unused_records = 0usize;
-        for result in catalog_results {
-            match result {
-                Ok((handle, _, _, type_code)) if is_unused_type(type_code) => {
-                    unused_records += 1;
-                    if unused_records == 1 {
-                        let mut diagnostic = ReadDiagnostic::new(
-                            "unused-object-type",
-                            ReadStage::RecordStream,
-                            format!(
-                                "Ignored a record of unused DWG object type {type_code} at handle {handle:#X}"
-                            ),
-                        );
-                        diagnostic.section = Some("AcDb:AcDbObjects".to_string());
-                        diagnostic.record_handle = Some(handle);
-                        diagnostic.record_type = Some(type_code.to_string());
-                        push_read_diagnostic(&mut diagnostics, diagnostic);
+        type CatalogRecords = Vec<(u64, usize, i16, i16)>;
+        type CatalogFailures = Vec<(u64, Option<u64>, CatalogFailure)>;
+        // Each chunk of handles gives its records and its failures apart, so
+        // the catalog is assembled from 24-byte records and no result per
+        // handle is held beside it. A chunk names only the first record of an
+        // unused type it meets: one diagnostic reports them all.
+        const CATALOG_CHUNK: usize = 1 << 14;
+        let catalog_chunks: Vec<(CatalogRecords, CatalogFailures)> =
+            map_chunks(&handles, CATALOG_CHUNK, |handles| {
+                let mut records = Vec::with_capacity(handles.len());
+                let mut failures = Vec::new();
+                let mut unused_named = false;
+                for &handle in handles {
+                    let Some(offset) = self.obj_reader.offset_for(handle) else {
+                        failures.push((handle, None, CatalogFailure::MissingOffset));
+                        continue;
+                    };
+                    if offset < 0 {
+                        failures.push((handle, None, CatalogFailure::NegativeOffset(offset)));
+                        continue;
+                    }
+                    let source_offset = offset as usize;
+                    match self.obj_reader.type_code_at(source_offset) {
+                        Ok(raw) => {
+                            let type_code = Self::resolve_type_code(raw, &class_map);
+                            if !is_unused_type(type_code) {
+                                records.push((handle, source_offset, raw, type_code));
+                            } else if !unused_named {
+                                unused_named = true;
+                                failures.push((
+                                    handle,
+                                    None,
+                                    CatalogFailure::UnusedType(type_code),
+                                ));
+                            }
+                        }
+                        Err(_error) => failures.push((
+                            handle,
+                            Some(source_offset as u64),
+                            CatalogFailure::RecordType,
+                        )),
                     }
                 }
-                Ok(record) => record_catalog.push(record),
-                Err((handle, source_offset, failure)) => {
-                    skipped_catalog = skipped_catalog.saturating_add(1);
-                    let message = match failure {
-                        CatalogFailure::MissingOffset => {
-                            format!("No source offset for handle {handle:#X}")
+                (records, failures)
+            });
+        drop(handles);
+        let mut record_catalog = Vec::with_capacity(
+            catalog_chunks
+                .iter()
+                .map(|(records, _)| records.len())
+                .sum(),
+        );
+        let mut skipped_catalog = 0usize;
+        let mut unused_reported = false;
+        for (records, failures) in catalog_chunks {
+            record_catalog.extend(records);
+            for (handle, source_offset, failure) in failures {
+                let message = match failure {
+                    CatalogFailure::UnusedType(type_code) => {
+                        if !unused_reported {
+                            unused_reported = true;
+                            let mut diagnostic = ReadDiagnostic::new(
+                                "unused-object-type",
+                                ReadStage::RecordStream,
+                                format!(
+                                    "Ignored a record of unused DWG object type {type_code} at handle {handle:#X}"
+                                ),
+                            );
+                            diagnostic.section = Some("AcDb:AcDbObjects".to_string());
+                            diagnostic.record_handle = Some(handle);
+                            diagnostic.record_type = Some(type_code.to_string());
+                            push_read_diagnostic(&mut diagnostics, diagnostic);
                         }
-                        CatalogFailure::NegativeOffset(offset) => {
-                            format!("Negative source offset {offset} for handle {handle:#X}")
-                        }
-                        CatalogFailure::RecordType => {
-                            format!("Could not read record type at handle {handle:#X}")
-                        }
-                    };
-                    self.notifications
-                        .notify(NotificationType::Error, message.clone());
-                    let mut diagnostic = ReadDiagnostic::new(
-                        "record-catalog-failed",
-                        ReadStage::RecordStream,
-                        message,
-                    );
-                    diagnostic.source_offset = source_offset;
-                    diagnostic.source_offset_basis = Some("object-section-byte".to_string());
-                    diagnostic.section = Some("AcDb:AcDbObjects".to_string());
-                    diagnostic.record_handle = Some(handle);
-                    push_read_diagnostic(&mut diagnostics, diagnostic);
-                }
+                        continue;
+                    }
+                    CatalogFailure::MissingOffset => {
+                        format!("No source offset for handle {handle:#X}")
+                    }
+                    CatalogFailure::NegativeOffset(offset) => {
+                        format!("Negative source offset {offset} for handle {handle:#X}")
+                    }
+                    CatalogFailure::RecordType => {
+                        format!("Could not read record type at handle {handle:#X}")
+                    }
+                };
+                skipped_catalog = skipped_catalog.saturating_add(1);
+                self.notifications
+                    .notify(NotificationType::Error, message.clone());
+                let mut diagnostic =
+                    ReadDiagnostic::new("record-catalog-failed", ReadStage::RecordStream, message);
+                diagnostic.source_offset = source_offset;
+                diagnostic.source_offset_basis = Some("object-section-byte".to_string());
+                diagnostic.section = Some("AcDb:AcDbObjects".to_string());
+                diagnostic.record_handle = Some(handle);
+                push_read_diagnostic(&mut diagnostics, diagnostic);
             }
         }
         self.report_progress(75);
@@ -2181,27 +2205,22 @@ impl DwgDocumentBuilder {
             }
         }
 
-        // Build a reverse map: entity_handle → block_record_handle
-        // from the canonical entity_handles (R2004+). R13-R2000 chains
-        // are resolved after Pass 2 supplies their entity links below.
-        // entity_mode=1 identifies paper space but not a particular layout.
-        let mut binary_entity_owner: foldhash::HashMap<Handle, Handle> =
-            foldhash::HashMap::default();
+        // Save the canonical entity_handles (R2004+) from the DWG binary for
+        // the writer. The reverse map from entity to block record is built
+        // after Pass 2, for the entities it stored.
+        let mut owner_links = 0usize;
         for entry in &parsed_entries {
             if let ParsedEntry::Block(h, data) = entry {
                 let br_handle = Handle::from(*h);
-                // Save original entity_handles from the DWG binary for the writer
                 let orig_handles: Vec<Handle> = data
                     .entity_handles
                     .iter()
                     .map(|&eh| Handle::from(eh))
                     .collect();
+                owner_links = owner_links.saturating_add(orig_handles.len());
                 document
                     .block_entity_handles
                     .insert(br_handle, orig_handles);
-                for &eh in &data.entity_handles {
-                    binary_entity_owner.insert(Handle::from(eh), br_handle);
-                }
             }
         }
 
@@ -2219,7 +2238,7 @@ impl DwgDocumentBuilder {
                 pass1_started.elapsed().as_secs_f64() * 1000.0,
                 parsed_entries.len(),
                 document.block_records.len(),
-                binary_entity_owner.len(),
+                owner_links,
             );
         }
 
@@ -2232,7 +2251,7 @@ impl DwgDocumentBuilder {
         // non-graphical classes qualify, so no entity, block or table record
         // goes missing. Their records stay in `record_catalog`: they exist in
         // the source, and their handles must stay unused.
-        let skipped_classes: HashMap<i16, &str> = document
+        let skipped_classes: HashMap<i16, String> = document
             .classes
             .iter()
             .filter(|class| {
@@ -2243,29 +2262,37 @@ impl DwgDocumentBuilder {
                         .iter()
                         .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
             })
-            .map(|class| (class.class_number, class.dxf_name.as_str()))
+            .map(|class| (class.class_number, class.dxf_name.clone()))
             .collect();
         let mut skipped_object_classes = std::collections::BTreeMap::<String, usize>::new();
-        let pass2_records: Vec<(u64, usize, i16, i16)> = record_catalog
-            .iter()
-            .copied()
-            .filter(|(_, _, raw_type_code, type_code)| {
-                if let Some(name) = skipped_classes.get(raw_type_code) {
-                    *skipped_object_classes
-                        .entry((*name).to_string())
-                        .or_default() += 1;
-                    return false;
-                }
-                !is_table_type(*type_code)
-            })
-            .collect();
+        for (_, _, raw_type_code, _) in &record_catalog {
+            if let Some(name) = skipped_classes.get(raw_type_code) {
+                *skipped_object_classes.entry(name.clone()).or_default() += 1;
+            }
+        }
+        // Pass 2 reads every catalogued record but the table records and the
+        // skipped classes. It walks the catalog itself: a filtered copy would
+        // hold 24 bytes per record through the whole pass.
+        let in_pass2 = |&(_, _, raw_type_code, type_code): &(u64, usize, i16, i16)| {
+            !skipped_classes.contains_key(&raw_type_code) && !is_table_type(type_code)
+        };
+        let pass2_count = record_catalog.iter().filter(|r| in_pass2(r)).count();
         // LIGHT's optional IES/photometric tail is controlled by the
         // LIGHTINGUNITS entry in AcDbVariableDictionary, not by record length.
         // Resolve the dictionary variable before the parallel entity pass so a
         // LIGHT with has_photometric_data=false still consumes its presence bit.
+        // A drawing without lights needs no lookup, and only entries of that
+        // name are kept: a dictionary can hold hundreds of thousands of
+        // entries.
+        let has_lights = record_catalog
+            .iter()
+            .any(|record| in_pass2(record) && record.3 == OBJ_LIGHT);
         let mut variable_entries: Vec<(String, u64)> = Vec::new();
         let mut variable_values: HashMap<u64, String> = HashMap::new();
-        for &(_, offset, _, type_code) in &pass2_records {
+        let lookup = record_catalog
+            .iter()
+            .filter(|record| has_lights && in_pass2(record));
+        for &(_, offset, _, type_code) in lookup {
             if type_code != OBJ_DICTIONARY && type_code != OBJ_DICTIONARYVAR {
                 continue;
             }
@@ -2296,7 +2323,12 @@ impl DwgDocumentBuilder {
             if let Some((handle, value)) = variable {
                 variable_values.insert(handle, value);
             }
-            variable_entries.extend(entries.into_iter().map(|entry| (entry.name, entry.handle)));
+            variable_entries.extend(
+                entries
+                    .into_iter()
+                    .filter(|entry| entry.name.eq_ignore_ascii_case("LIGHTINGUNITS"))
+                    .map(|entry| (entry.name, entry.handle)),
+            );
         }
         let photometric_lighting = variable_entries.iter().any(|(name, handle)| {
             name.eq_ignore_ascii_case("LIGHTINGUNITS")
@@ -2304,7 +2336,11 @@ impl DwgDocumentBuilder {
                     .get(handle)
                     .is_some_and(|value| value.trim() == "2")
         });
-        document.reserve_loaded_entities(pass2_records.len());
+        // A visitor decides which entities are stored, and may keep few of
+        // them; room for every record is reserved only when all are kept.
+        if visit.is_none() {
+            document.reserve_loaded_entities(pass2_count);
+        }
         // Pass 2 also contains graphical entities. Reserve non-entity storage
         // from decoded object batches below, rather than from all record handles.
 
@@ -2318,10 +2354,10 @@ impl DwgDocumentBuilder {
         let mut decode_seconds = 0.0f64;
         let mut commit_seconds = 0.0f64;
 
-        let pass2_total = pass2_records.len().max(1);
+        let pass2_total = record_catalog.len().max(1);
         let mut pass2_done = 0usize;
         let capture_raw = std::env::var_os("ACADRUST_RAW_ALL").is_some();
-        for batch in pass2_records.chunks(batch_size) {
+        for batch in record_catalog.chunks(batch_size) {
             let decode_started = web_time::Instant::now();
             let chunks: Vec<Pass2Chunk> = map_chunks(batch, chunk_size, |records| {
                 let mut chunk = Pass2Chunk::new(
@@ -2330,7 +2366,9 @@ impl DwgDocumentBuilder {
                     paper_space_block_handle,
                     records.len(),
                 );
-                for &(handle, offset, raw_type_code, type_code) in records {
+                for &(handle, offset, raw_type_code, type_code) in
+                    records.iter().filter(|r| in_pass2(r))
+                {
                     let (_, mut reader) = match self.obj_reader.read_record_at(offset) {
                         Ok(record) => record,
                         Err(error) => {
@@ -2634,7 +2672,7 @@ impl DwgDocumentBuilder {
                 pass2_started.elapsed().as_secs_f64() * 1000.0,
                 decode_seconds * 1000.0,
                 commit_seconds * 1000.0,
-                pass2_records.len(),
+                pass2_count,
                 worker_count,
             );
         }
@@ -2955,6 +2993,22 @@ impl DwgDocumentBuilder {
         }
         self.report_progress(925);
         let ownership_started = web_time::Instant::now();
+        // Reverse map entity → block record from the canonical
+        // entity_handles (R2004+), for the entities in the document: only
+        // those are placed below, and a visiting read keeps few of them.
+        let mut binary_entity_owner: foldhash::HashMap<Handle, Handle> =
+            foldhash::HashMap::default();
+        for entry in &parsed_entries {
+            if let ParsedEntry::Block(h, data) = entry {
+                let br_handle = Handle::from(*h);
+                for &eh in &data.entity_handles {
+                    let eh = Handle::from(eh);
+                    if document.entity_index.contains_key(&eh) {
+                        binary_entity_owner.insert(eh, br_handle);
+                    }
+                }
+            }
+        }
         if !self.obj_reader.version().r2004_plus() {
             for entry in &parsed_entries {
                 if let ParsedEntry::Block(handle, data) = entry {
@@ -2998,7 +3052,6 @@ impl DwgDocumentBuilder {
 
         // Ensure allocations made by the repair steps start above every source
         // record, even when the file's HANDSEED was stale.
-        let max_from_reader = handles.iter().max().copied().unwrap_or(0);
         if max_from_reader + 1 > document.header.handle_seed {
             document.header.handle_seed = max_from_reader + 1;
         }
@@ -6117,9 +6170,13 @@ impl DwgDocumentBuilder {
                     obj.owner = owner_handle;
                     obj.hard_owner = data.hard_owner;
                     obj.duplicate_cloning = data.duplicate_cloning;
-                    for entry in data.entries {
-                        obj.add_entry(entry.name, Handle::from(entry.handle));
-                    }
+                    // Collected at its final size: a dictionary can hold
+                    // hundreds of thousands of entries.
+                    obj.entries = data
+                        .entries
+                        .into_iter()
+                        .map(|entry| (entry.name, Handle::from(entry.handle)))
+                        .collect();
                     document.objects.insert(
                         Handle::from(handle),
                         crate::objects::ObjectType::Dictionary(obj),
@@ -6133,9 +6190,11 @@ impl DwgDocumentBuilder {
                     obj.hard_owner = data.hard_owner;
                     obj.duplicate_cloning = data.duplicate_cloning;
                     obj.default_handle = Handle::from(data.default_handle);
-                    for entry in data.entries {
-                        obj.entries.push((entry.name, Handle::from(entry.handle)));
-                    }
+                    obj.entries = data
+                        .entries
+                        .into_iter()
+                        .map(|entry| (entry.name, Handle::from(entry.handle)))
+                        .collect();
                     document.objects.insert(
                         Handle::from(handle),
                         crate::objects::ObjectType::DictionaryWithDefault(obj),
