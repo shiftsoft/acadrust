@@ -122,6 +122,11 @@ pub struct ReadStats {
     /// nor `skipped_source_records`.
     #[cfg_attr(feature = "serde", serde(default))]
     pub skipped_object_classes: std::collections::BTreeMap<String, usize>,
+    /// Proxy objects (`ACAD_PROXY_OBJECT`) left out because the class they
+    /// stand for was asked to be skipped, by class DXF name. They count like
+    /// the records of `skipped_object_classes`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub skipped_proxy_objects: std::collections::BTreeMap<String, usize>,
 }
 
 impl ReadStats {
@@ -163,6 +168,7 @@ impl ReadStats {
             record_stream_read,
             diagnostics,
             skipped_object_classes: std::collections::BTreeMap::new(),
+            skipped_proxy_objects: std::collections::BTreeMap::new(),
         }
     }
 

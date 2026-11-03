@@ -326,12 +326,18 @@ pub struct DwgReadOptions {
     /// of the read, such as `LSSTROKEPATTERNCOMPONENT`.
     ///
     /// A record whose class in the CLASSES section has one of these names,
-    /// compared ignoring ASCII case, is neither decoded nor stored. Handles
-    /// that point to it (dictionary entries, owners, reactors) are kept as
-    /// they are and resolve to no object, as for a record that failed to
-    /// decode. A skipped record is not an error in strict or failsafe mode;
+    /// compared ignoring ASCII case, is neither decoded nor stored, and
+    /// neither is a proxy object (`ACAD_PROXY_OBJECT`) standing for such a
+    /// class. A dictionary leaves out its entries that name a skipped record
+    /// of the class itself, so a save writes no entry for a record that is
+    /// gone. Other handles that point to a skipped record (owners, reactors,
+    /// entries naming a skipped proxy) are kept as they are and resolve to
+    /// no object, as for a record that failed to decode. A skipped record is
+    /// not an error in strict or failsafe mode;
     /// [`ReadStats::skipped_object_classes`](crate::io::read::ReadStats::skipped_object_classes)
-    /// counts them by class.
+    /// and
+    /// [`ReadStats::skipped_proxy_objects`](crate::io::read::ReadStats::skipped_proxy_objects)
+    /// count them by class.
     ///
     /// Entity classes and the fixed object types (DICTIONARY, XRECORD and so
     /// on) are never skipped. A skipped class is missing from the document,
@@ -1690,6 +1696,7 @@ impl<R: Read + Seek> DwgReader<R> {
         let mut decoded_source_records = 0usize;
         let mut skipped_source_records = 0usize;
         let mut skipped_object_classes = std::collections::BTreeMap::new();
+        let mut skipped_proxy_objects = std::collections::BTreeMap::new();
         let objects_started = web_time::Instant::now();
         if !handle_map.is_empty() {
             let objects_buf = match cached_objects {
@@ -1728,6 +1735,7 @@ impl<R: Read + Seek> DwgReader<R> {
                         decoded_source_records = build_outcome.decoded_records;
                         skipped_source_records = build_outcome.skipped_records;
                         skipped_object_classes = build_outcome.skipped_object_classes;
+                        skipped_proxy_objects = build_outcome.skipped_proxy_objects;
                         if !failsafe && skipped_source_records != 0 {
                             return Err(DxfError::Parse(build_outcome.diagnostics.iter()
                                 .find(|diagnostic| diagnostic.code != "auxiliary-object-preserved")
@@ -1984,6 +1992,7 @@ impl<R: Read + Seek> DwgReader<R> {
             diagnostics,
         );
         stats.skipped_object_classes = skipped_object_classes;
+        stats.skipped_proxy_objects = skipped_proxy_objects;
         Ok(crate::io::read::ReadOutcome::new(document, stats))
     }
 
