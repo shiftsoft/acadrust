@@ -309,7 +309,7 @@ fn mtext_context_data_has_no_subclass_marker_and_autocad_point_codes() {
         }),
     };
     doc.objects
-        .insert(handle, ObjectType::ObjectContextData(context));
+        .insert(handle, ObjectType::ObjectContextData(Box::new(context)));
     let pairs = write_pairs(&doc);
     let rec = record(&pairs, handle);
     assert!(
@@ -381,8 +381,10 @@ fn visibility_parameter(
         name: "Visibility1".to_string(),
         ..Default::default()
     };
-    doc.objects
-        .insert(handle, ObjectType::BlockVisibilityParameter(object));
+    doc.objects.insert(
+        handle,
+        ObjectType::BlockVisibilityParameter(Box::new(object)),
+    );
     handle
 }
 
@@ -422,7 +424,8 @@ fn alignment_grip(doc: &mut CadDocument) -> Handle {
         }),
         ..Default::default()
     };
-    doc.objects.insert(handle, ObjectType::DynamicBlock(object));
+    doc.objects
+        .insert(handle, ObjectType::DynamicBlock(Box::new(object)));
     handle
 }
 

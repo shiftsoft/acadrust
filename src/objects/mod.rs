@@ -394,13 +394,18 @@ impl Layout {
 }
 
 /// Object types
+///
+/// `CadDocument::objects` stores every object inline, so each one costs the
+/// size of the widest variant. Variants wider than the common records
+/// (dictionaries, XRecords, proxies) hold their payload in a `Box`, as the
+/// wide `EntityType` variants do.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ObjectType {
     /// Dictionary object
     Dictionary(Dictionary),
     /// Layout object
-    Layout(Layout),
+    Layout(Box<Layout>),
     /// XRecord object - extended data storage
     XRecord(XRecord),
     /// Group object - named collection of entities
@@ -412,22 +417,22 @@ pub enum ObjectType {
     /// UnderlayDefinition object - PDF/DWF/DGN underlay file reference
     UnderlayDefinition(UnderlayDefinition),
     /// PlotSettings object - plot configuration
-    PlotSettings(PlotSettings),
+    PlotSettings(Box<PlotSettings>),
     /// MultiLeaderStyle object - multileader style definition
-    MultiLeaderStyle(MultiLeaderStyle),
+    MultiLeaderStyle(Box<MultiLeaderStyle>),
     /// TableStyle object - table style definition
-    TableStyle(TableStyle),
+    TableStyle(Box<TableStyle>),
     /// Standalone AcDbTableContent object.
     ///
     /// The binary/DXF payload is the same linked/formatted table-data tree
     /// embedded by modern ACAD_TABLE entities, so it deliberately reuses the
     /// complete semantic `Table` model.
-    TableContent(crate::entities::Table),
+    TableContent(Box<crate::entities::Table>),
     /// Scale object - named scale definition
     Scale(Scale),
     /// Annotative per-object context data (`AcDb*ObjectContextData` leaf) — one
     /// per-scale representation of an annotative object.
-    ObjectContextData(ObjectContextData),
+    ObjectContextData(Box<ObjectContextData>),
     /// SortEntitiesTable object - entity draw order
     SortEntitiesTable(SortEntitiesTable),
     /// DictionaryVariable object - named variable in dictionary
@@ -435,13 +440,13 @@ pub enum ObjectType {
     /// VisualStyle object
     VisualStyle(VisualStyle),
     /// Material object
-    Material(Material),
+    Material(Box<Material>),
     /// ImageDefinitionReactor object
     ImageDefinitionReactor(ImageDefinitionReactor),
     /// GeoData object
-    GeoData(GeoData),
+    GeoData(Box<GeoData>),
     /// SpatialFilter object
-    SpatialFilter(SpatialFilter),
+    SpatialFilter(Box<SpatialFilter>),
     /// RasterVariables object
     RasterVariables(RasterVariables),
     /// BookColor (DBCOLOR) object
@@ -453,21 +458,21 @@ pub enum ObjectType {
     /// WipeoutVariables object
     WipeoutVariables(WipeoutVariables),
     /// Dynamic-block visibility parameter.
-    BlockVisibilityParameter(BlockVisibilityParameter),
+    BlockVisibilityParameter(Box<BlockVisibilityParameter>),
     /// Dynamic-block parameter, grip, action or evaluation/history object.
-    DynamicBlock(DynamicBlockObject),
+    DynamicBlock(Box<DynamicBlockObject>),
     /// Associative network, dependency, action-body or action-parameter object.
-    Associative(AssociativeObject),
+    Associative(Box<AssociativeObject>),
     /// Class-registered non-graphical object with a native semantic payload.
-    ClassObject(ClassObject),
+    ClassObject(Box<ClassObject>),
     /// Database helper object carrying an index/filter/reference graph.
     DataObject(DataObject),
     /// Dynamic text field definition.
-    Field(Field),
+    Field(Box<Field>),
     /// Collection of field handles.
     FieldList(FieldList),
     /// Registered application object represented by typed DXF properties.
-    RegisteredClass(RegisteredClassObject),
+    RegisteredClass(Box<RegisteredClassObject>),
     /// DGN line-style definition or component object.
     DgnLineStyle(DgnLineStyleObject),
     /// Fixed ACAD proxy-object schema.
@@ -807,5 +812,24 @@ mod tests {
         assert_eq!(raw_dxf_codes, Some(vec![(1, "source".into())]));
         assert_eq!(raw_dwg_data, Some(vec![1, 2, 3]));
         assert_eq!(raw_dwg_version, Some(crate::types::DxfVersion::AC1032));
+    }
+
+    #[test]
+    fn object_type_stays_narrow() {
+        let size = std::mem::size_of::<ObjectType>();
+        assert!(size <= 200, "ObjectType is {size} bytes");
+    }
+
+    #[test]
+    fn boxed_variants_still_match_by_reference() {
+        let mut layout = Layout::new("Sheet");
+        layout.tab_order = 2;
+        let object = ObjectType::Layout(Box::new(layout));
+        let ObjectType::Layout(found) = &object else {
+            unreachable!()
+        };
+        assert_eq!(found.name, "Sheet");
+        assert_eq!(found.tab_order, 2);
+        assert_eq!(object.clone(), object);
     }
 }

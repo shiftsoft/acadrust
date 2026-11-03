@@ -1359,7 +1359,7 @@ fn host_layout<'a>(
 ) -> Option<&'a crate::objects::Layout> {
     let layouts = || {
         doc.objects.values().filter_map(|o| match o {
-            ObjectType::Layout(l) => Some(l),
+            ObjectType::Layout(l) => Some(&**l),
             _ => None,
         })
     };
@@ -2976,7 +2976,8 @@ impl CadDocument {
                     objects: f.referenced_objects.clone(),
                 },
             );
-            self.objects.insert(f.handle, ObjectType::Field(f));
+            self.objects
+                .insert(f.handle, ObjectType::Field(Box::new(f)));
         }
     }
 

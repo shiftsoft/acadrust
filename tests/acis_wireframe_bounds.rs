@@ -292,7 +292,7 @@ fn acds_material_bindings_survive_modeler_entity_roundtrips() {
         });
         document.objects.insert(
             material.handle,
-            acadrust::objects::ObjectType::Material(material),
+            acadrust::objects::ObjectType::Material(Box::new(material)),
         );
         let mut solid = Solid3D::new();
         solid.acis_data = data.clone();

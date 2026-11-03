@@ -323,7 +323,7 @@ mod tests {
         }
         document
             .objects
-            .insert(material_handle, ObjectType::Material(material));
+            .insert(material_handle, ObjectType::Material(Box::new(material)));
         let Some(ObjectType::Dictionary(dictionary)) = document
             .objects
             .get_mut(&document.header.acad_material_dict_handle)

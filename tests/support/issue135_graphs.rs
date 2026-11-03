@@ -465,14 +465,14 @@ pub fn document(version: DxfVersion) -> CadDocument {
     for (handle, group) in groups(version) {
         document.objects.insert(
             handle,
-            ObjectType::Associative(AssociativeObject {
+            ObjectType::Associative(Box::new(AssociativeObject {
                 handle,
                 owner: document.header.named_objects_dict_handle,
                 dxf_name: "ASSOC2DCONSTRAINTGROUP".into(),
                 cpp_class_name: "AcDbAssoc2dConstraintGroup".into(),
                 data: AssociativeData::ConstraintGroup(group),
                 ..Default::default()
-            }),
+            })),
         );
     }
     document

@@ -559,9 +559,10 @@ fn valid_mleader_context_still_decodes_to_fields_without_recovery() {
         scale: scale_handle,
         kind: ObjectContextKind::MLeader(context),
     };
-    source
-        .objects
-        .insert(auxiliary, ObjectType::ObjectContextData(object.clone()));
+    source.objects.insert(
+        auxiliary,
+        ObjectType::ObjectContextData(Box::new(object.clone())),
+    );
     let bytes = DwgWriter::write_to_vec(&source).unwrap();
     let outcome = DwgReader::from_stream(Cursor::new(bytes))
         .read_with_stats()
@@ -569,7 +570,7 @@ fn valid_mleader_context_still_decodes_to_fields_without_recovery() {
     assert!(outcome.stats.diagnostics.is_empty());
     assert_eq!(
         outcome.document.objects[&auxiliary],
-        ObjectType::ObjectContextData(object)
+        ObjectType::ObjectContextData(Box::new(object))
     );
     assert_eq!(outcome.document.context_scales[&auxiliary], scale_handle);
 

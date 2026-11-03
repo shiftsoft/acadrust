@@ -2624,7 +2624,7 @@ mod tests {
             },
         ));
         doc.objects
-            .insert(handle, ObjectType::DynamicBlock(history));
+            .insert(handle, ObjectType::DynamicBlock(Box::new(history)));
         let mut source =
             DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
                 .read()
@@ -2713,7 +2713,7 @@ mod tests {
         filter.handle = document.allocate_handle();
         document
             .objects
-            .insert(filter.handle, ObjectType::ClassObject(filter));
+            .insert(filter.handle, ObjectType::ClassObject(Box::new(filter)));
         document
     }
 
@@ -3625,7 +3625,7 @@ mod tests {
         let owner = document.header.named_objects_dict_handle;
         document.objects.insert(
             handle,
-            ObjectType::Associative(AssociativeObject {
+            ObjectType::Associative(Box::new(AssociativeObject {
                 handle,
                 owner,
                 dxf_name: "ASSOC2DCONSTRAINTGROUP".to_string(),
@@ -3657,21 +3657,21 @@ mod tests {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }),
+            })),
         );
         document
     }
 
     fn constraint_group_of(document: &CadDocument) -> &crate::objects::Assoc2dConstraintGroup {
-        use crate::objects::{AssociativeData, AssociativeObject, ObjectType};
+        use crate::objects::{AssociativeData, ObjectType};
         document
             .objects
             .values()
             .find_map(|object| match object {
-                ObjectType::Associative(AssociativeObject {
-                    data: AssociativeData::ConstraintGroup(group),
-                    ..
-                }) => Some(group),
+                ObjectType::Associative(object) => match &object.data {
+                    AssociativeData::ConstraintGroup(group) => Some(group),
+                    _ => None,
+                },
                 _ => None,
             })
             .expect("constraint group should round-trip")

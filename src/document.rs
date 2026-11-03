@@ -2010,7 +2010,7 @@ impl CadDocument {
         mleaderstyle_std.text_style_handle = Some(self.header.current_text_style_handle);
         self.objects.insert(
             mleaderstyle_std_handle,
-            ObjectType::MultiLeaderStyle(mleaderstyle_std),
+            ObjectType::MultiLeaderStyle(Box::new(mleaderstyle_std)),
         );
 
         // -- ACAD_TABLESTYLE dictionary (contains "Standard") --
@@ -2030,7 +2030,7 @@ impl CadDocument {
         tablestyle_std.set_all_text_styles("Standard", Some(self.header.current_text_style_handle));
         self.objects.insert(
             tablestyle_std_handle,
-            ObjectType::TableStyle(tablestyle_std),
+            ObjectType::TableStyle(Box::new(tablestyle_std)),
         );
 
         // -- ACAD_LAYOUT dictionary (Model + Layout1) --
@@ -2049,8 +2049,10 @@ impl CadDocument {
         model_layout.tab_order = 0;
         model_layout.flags = 1; // model space
         model_layout.block_record = self.header.model_space_block_handle;
-        self.objects
-            .insert(model_layout_handle, ObjectType::Layout(model_layout));
+        self.objects.insert(
+            model_layout_handle,
+            ObjectType::Layout(Box::new(model_layout)),
+        );
 
         // -- Layout: Layout1 (paper space) --
         let mut paper_layout = crate::objects::Layout::new("Layout1");
@@ -2059,8 +2061,10 @@ impl CadDocument {
         paper_layout.tab_order = 1;
         paper_layout.block_record = self.header.paper_space_block_handle;
 
-        self.objects
-            .insert(paper_layout_handle, ObjectType::Layout(paper_layout));
+        self.objects.insert(
+            paper_layout_handle,
+            ObjectType::Layout(Box::new(paper_layout)),
+        );
 
         // -- ACAD_PLOTSETTINGS dictionary (empty) --
         let mut plotsettings_dict = crate::objects::Dictionary::new();
@@ -2605,7 +2609,7 @@ impl CadDocument {
         object.owner = root;
         object.data = DynamicBlockData::EvaluationGraph(graph);
         self.objects
-            .insert(handle, ObjectType::DynamicBlock(object));
+            .insert(handle, ObjectType::DynamicBlock(Box::new(object)));
     }
 
     pub fn solid_history_operation(&self, entity: Handle) -> Option<&SolidHistoryOperation> {
@@ -2978,7 +2982,7 @@ impl CadDocument {
         node_object.owner = target_evaluation;
         node_object.data = DynamicBlockData::SolidHistoryNode(step);
         self.objects
-            .insert(boolean, ObjectType::DynamicBlock(node_object));
+            .insert(boolean, ObjectType::DynamicBlock(Box::new(node_object)));
         if let Some(ObjectType::DynamicBlock(value)) = self.objects.get_mut(&target_evaluation) {
             value.data = DynamicBlockData::EvaluationGraph(merged);
         }
@@ -3040,7 +3044,7 @@ impl CadDocument {
         node_object.owner = evaluation;
         node_object.data = DynamicBlockData::SolidHistoryNode(operation);
         self.objects
-            .insert(root, ObjectType::DynamicBlock(root_object));
+            .insert(root, ObjectType::DynamicBlock(Box::new(root_object)));
         self.insert_solid_history_evaluation_graph(
             evaluation,
             root,
@@ -3059,7 +3063,7 @@ impl CadDocument {
             },
         );
         self.objects
-            .insert(node, ObjectType::DynamicBlock(node_object));
+            .insert(node, ObjectType::DynamicBlock(Box::new(node_object)));
         if !self.set_entity_history_handle(entity, Some(root)) {
             self.objects.remove(&root);
             self.objects.remove(&evaluation);
@@ -3158,7 +3162,7 @@ impl CadDocument {
         node_object.owner = evaluation;
         node_object.data = DynamicBlockData::SolidHistoryNode(operation);
         self.objects
-            .insert(node, ObjectType::DynamicBlock(node_object));
+            .insert(node, ObjectType::DynamicBlock(Box::new(node_object)));
         if let Some(ObjectType::DynamicBlock(value)) = self.objects.get_mut(&graph.root) {
             if let DynamicBlockData::SolidHistory(history) = &mut value.data {
                 history.history_node_id = node_id;
@@ -3924,7 +3928,7 @@ impl CadDocument {
 
         // Store the Layout object
         self.objects
-            .insert(layout_handle, ObjectType::Layout(layout));
+            .insert(layout_handle, ObjectType::Layout(Box::new(layout)));
 
         Ok(layout_handle)
     }
@@ -4068,7 +4072,8 @@ impl CadDocument {
         if let Some(record) = self.block_records.iter_mut().find(|r| r.handle == model) {
             record.layout = handle;
         }
-        self.objects.insert(handle, ObjectType::Layout(layout));
+        self.objects
+            .insert(handle, ObjectType::Layout(Box::new(layout)));
     }
 
     /// Complete the root dictionary's `ACAD_LAYOUT` registration.

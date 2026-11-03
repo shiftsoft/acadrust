@@ -33,7 +33,7 @@ fn retained_dimassoc_record_observes_added_extension_dictionary() {
     object.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation::default());
     document
         .objects
-        .insert(handle, ObjectType::Associative(object));
+        .insert(handle, ObjectType::Associative(Box::new(object)));
     let mut source = dwg_roundtrip(&document);
     let record = source.ensure_xrecord(handle, "REVIEW_DATA");
     let dictionary = source.extension_dictionary_handle(handle).unwrap();
@@ -56,7 +56,7 @@ fn retained_dimassoc_record_observes_existing_extension_dictionary_edits() {
     object.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation::default());
     document
         .objects
-        .insert(handle, ObjectType::Associative(object));
+        .insert(handle, ObjectType::Associative(Box::new(object)));
     let dictionary = document.ensure_extension_dictionary(handle);
     let record = document.ensure_xrecord(handle, "ORIGINAL");
     let mut source = dwg_roundtrip(&document);
@@ -151,7 +151,7 @@ fn array_body_item_handles_participate_in_reference_remapping() {
         object.handle = handle;
         document
             .objects
-            .insert(handle, ObjectType::Associative(object));
+            .insert(handle, ObjectType::Associative(Box::new(object)));
 
         document.resolve_references();
         let remapped = document
