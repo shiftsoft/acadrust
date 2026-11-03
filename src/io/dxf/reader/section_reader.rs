@@ -1516,6 +1516,10 @@ pub struct SectionReader<'a> {
     failsafe: bool,
     skipped_records: usize,
     recovery_errors: Vec<SectionRecoveryError>,
+    /// DXF names of object classes whose records are not read.
+    skip_object_classes: Vec<String>,
+    /// Records left out by `skip_object_classes`, by class DXF name.
+    skipped_object_classes: std::collections::BTreeMap<String, usize>,
 }
 
 /// A record-level error recovered by a section reader.
@@ -1534,6 +1538,8 @@ impl<'a> SectionReader<'a> {
             failsafe: false,
             skipped_records: 0,
             recovery_errors: Vec::new(),
+            skip_object_classes: Vec::new(),
+            skipped_object_classes: std::collections::BTreeMap::new(),
         }
     }
 
@@ -1544,8 +1550,19 @@ impl<'a> SectionReader<'a> {
         self
     }
 
+    /// Leave out the OBJECTS records of these non-graphical classes, by DXF
+    /// name. See [`crate::io::dxf::DxfReaderConfiguration::skip_object_classes`].
+    pub fn with_skipped_object_classes(mut self, names: &[String]) -> Self {
+        self.skip_object_classes = names.to_vec();
+        self
+    }
+
     pub fn decoded_records(&self) -> usize {
         self.decoded_records
+    }
+
+    pub fn take_skipped_object_classes(&mut self) -> std::collections::BTreeMap<String, usize> {
+        std::mem::take(&mut self.skipped_object_classes)
     }
 
     pub fn skipped_records(&self) -> usize {
@@ -6903,6 +6920,18 @@ impl<'a> SectionReader<'a> {
         // causes phantom layouts with stale block_record handles and
         // orphaned dictionary entries.
         document.objects.clear();
+        let skipped_classes: Vec<String> = document
+            .classes
+            .iter()
+            .filter(|class| {
+                !class.is_an_entity
+                    && self
+                        .skip_object_classes
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
+            })
+            .map(|class| class.dxf_name.clone())
+            .collect();
 
         while let Some(pair) = self.read_section_pair()? {
             if pair.code == 0 && pair.value_string == "ENDSEC" {
@@ -6910,6 +6939,14 @@ impl<'a> SectionReader<'a> {
             }
 
             if pair.code == 0 {
+                if let Some(name) = skipped_classes
+                    .iter()
+                    .find(|name| name.eq_ignore_ascii_case(&pair.value_string))
+                {
+                    *self.skipped_object_classes.entry(name.clone()).or_default() += 1;
+                    self.skip_entity()?;
+                    continue;
+                }
                 let before = document.objects.len();
                 self.reader.record_xdata(true);
                 let result: Result<()> = (|| {

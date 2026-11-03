@@ -322,6 +322,22 @@ pub struct DwgReadOptions {
     /// Optional password for decrypting password-protected DWG files.
     #[cfg_attr(feature = "serde", serde(default))]
     pub password: Option<String>,
+    /// DXF names of non-graphical object classes whose records are left out
+    /// of the read, such as `LSSTROKEPATTERNCOMPONENT`.
+    ///
+    /// A record whose class in the CLASSES section has one of these names,
+    /// compared ignoring ASCII case, is neither decoded nor stored. Handles
+    /// that point to it (dictionary entries, owners, reactors) are kept as
+    /// they are and resolve to no object, as for a record that failed to
+    /// decode. A skipped record is not an error in strict or failsafe mode;
+    /// [`ReadStats::skipped_object_classes`](crate::io::read::ReadStats::skipped_object_classes)
+    /// counts them by class.
+    ///
+    /// Entity classes and the fixed object types (DICTIONARY, XRECORD and so
+    /// on) are never skipped. A skipped class is missing from the document,
+    /// so a save writes the drawing without those records. Empty by default.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub skip_object_classes: Vec<String>,
 }
 
 impl Default for DwgReadOptions {
@@ -332,6 +348,7 @@ impl Default for DwgReadOptions {
             max_mesh_face_indices: None,
             max_decompressed_bytes: None,
             password: None,
+            skip_object_classes: Vec::new(),
         }
     }
 }
@@ -369,6 +386,18 @@ impl DwgReadOptions {
     /// Set a password for decrypting password-protected DWG files.
     pub fn with_password(mut self, password: impl Into<String>) -> Self {
         self.password = Some(password.into());
+        self
+    }
+
+    /// Leave the records of these object classes out of the read.
+    ///
+    /// See [`Self::skip_object_classes`].
+    pub fn with_skipped_object_classes<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.skip_object_classes = names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -1239,6 +1268,20 @@ impl<R: Read + Seek> DwgReader<R> {
             .map(|outcome| outcome.document)
     }
 
+    /// Like [`Self::read_visiting`], but also returns the read statistics.
+    pub fn read_visiting_with_stats<F>(
+        &mut self,
+        mut visit: F,
+    ) -> std::result::Result<crate::io::read::ReadOutcome, DxfError>
+    where
+        F: FnMut(
+            &crate::document::CadDocument,
+            crate::entities::EntityType,
+        ) -> Option<crate::entities::EntityType>,
+    {
+        self.read_with_optional_visitor(Some(&mut visit))
+    }
+
     /// Read the file and return the document with source/decode statistics.
     pub fn read_with_stats(
         &mut self,
@@ -1646,6 +1689,7 @@ impl<R: Read + Seek> DwgReader<R> {
         let mut record_stream_read = false;
         let mut decoded_source_records = 0usize;
         let mut skipped_source_records = 0usize;
+        let mut skipped_object_classes = std::collections::BTreeMap::new();
         let objects_started = web_time::Instant::now();
         if !handle_map.is_empty() {
             let objects_buf = match cached_objects {
@@ -1673,6 +1717,7 @@ impl<R: Read + Seek> DwgReader<R> {
                         obj_reader.set_mesh_budget(self.options.mesh_budget());
                         let mut builder = crate::io::dwg::dwg_document_builder::DwgDocumentBuilder::new(obj_reader);
                         builder.set_failsafe(failsafe);
+                        builder.set_skipped_object_classes(&self.options.skip_object_classes);
                         if let Some(progress) = &self.progress {
                             builder.set_progress_callback(progress.clone());
                         }
@@ -1682,6 +1727,7 @@ impl<R: Read + Seek> DwgReader<R> {
                         };
                         decoded_source_records = build_outcome.decoded_records;
                         skipped_source_records = build_outcome.skipped_records;
+                        skipped_object_classes = build_outcome.skipped_object_classes;
                         if !failsafe && skipped_source_records != 0 {
                             return Err(DxfError::Parse(build_outcome.diagnostics.iter()
                                 .find(|diagnostic| diagnostic.code != "auxiliary-object-preserved")
@@ -1925,7 +1971,7 @@ impl<R: Read + Seek> DwgReader<R> {
         diagnostics.extend(std::mem::take(&mut self.pending_diagnostics));
         let source_sections =
             usize::from(handles_section_read).saturating_add(usize::from(objects_section_read));
-        let stats = crate::io::read::ReadStats::from_document(
+        let mut stats = crate::io::read::ReadStats::from_document(
             &document,
             SourceFormat::Dwg,
             source_sections,
@@ -1937,6 +1983,7 @@ impl<R: Read + Seek> DwgReader<R> {
             true,
             diagnostics,
         );
+        stats.skipped_object_classes = skipped_object_classes;
         Ok(crate::io::read::ReadOutcome::new(document, stats))
     }
 
