@@ -140,7 +140,7 @@ fn binary_proxy_objects_are_written_with_dwg_data_format() {
         payload: ProxyPayload::from_bits(&[0xAB, 0xC0], 10),
         ..Default::default()
     };
-    doc.objects.insert(handle, ObjectType::ProxyObject(object));
+    doc.objects.insert(handle, ObjectType::ProxyObject(Box::new(object)));
     let written = String::from_utf8(DxfWriter::new(&doc).write_to_vec().expect("write dxf"))
         .unwrap()
         .replace("\r\n", "\n");

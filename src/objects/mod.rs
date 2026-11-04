@@ -572,7 +572,7 @@ pub enum ObjectType {
     /// DGN line-style definition or component object.
     DgnLineStyle(DgnLineStyleObject),
     /// Fixed ACAD proxy-object schema.
-    ProxyObject(ProxyObject),
+    ProxyObject(Box<ProxyObject>),
     /// ACAD Arch non-graphical class (style, display rep, anchor, list).
     Arch(crate::classes::arch::ArchObject),
     /// Unknown object type (stored as raw data)

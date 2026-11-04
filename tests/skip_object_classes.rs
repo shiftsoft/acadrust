@@ -492,14 +492,14 @@ fn with_proxies(version: DxfVersion) -> (Fixture, CadDocument, Handle, Handle) {
         let handle = document.allocate_handle();
         document.objects.insert(
             handle,
-            ObjectType::ProxyObject(ProxyObject {
+            ObjectType::ProxyObject(Box::new(ProxyObject {
                 handle,
                 owner: fixture.components,
                 reactors: vec![fixture.components],
                 class_id,
                 payload: ProxyPayload::from_bytes(&[0xAB, 0xCD]),
                 ..ProxyObject::default()
-            }),
+            })),
         );
         if let Some(ObjectType::Dictionary(store)) = document.objects.get_mut(&fixture.components) {
             store.add_entry(key, handle);

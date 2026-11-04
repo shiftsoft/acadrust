@@ -7355,7 +7355,7 @@ impl<'a> SectionReader<'a> {
                                     raw_dwg_version: None,
                                 }))
                             } else {
-                                ObjectType::ProxyObject(object)
+                                ObjectType::ProxyObject(Box::new(object))
                             };
                             document.objects.insert(handle, object_type);
                         }
