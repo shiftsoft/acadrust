@@ -2,16 +2,16 @@
 
 ### Unreleased
 
-- **Narrower ObjectType** - The fifteen `ObjectType` variants wider than 200
+- **Narrower ObjectType** - The seventeen `ObjectType` variants wider than 200
   bytes (`Layout`, `PlotSettings`, `MultiLeaderStyle`, `TableStyle`,
-  `TableContent`, `ObjectContextData`, `Material`, `GeoData`,
-  `SpatialFilter`, `BlockVisibilityParameter`, `DynamicBlock`,
-  `Associative`, `ClassObject`, `Field` and `RegisteredClass`) hold their
-  payload in a `Box`, as the wide `EntityType` variants do. `ObjectType`
-  goes from 2,088 to 200 bytes, the size every entry of
-  `CadDocument::objects` pays: reading a drawing with 70,000 proxy objects
-  peaks at 324 MB instead of 636 MB. Code that matches by reference is
-  unchanged; code that builds these variants wraps the payload in
+  `TableContent`, `TableTemplate`, `ObjectContextData`, `Material`,
+  `GeoData`, `SpatialFilter`, `BlockVisibilityParameter`, `DynamicBlock`,
+  `Associative`, `ClassObject`, `Field`, `ProxyObject` and
+  `RegisteredClass`) hold their payload in a `Box`, as the wide `EntityType`
+  variants do. `ObjectType` goes from 2,088 to 200 bytes, the size every
+  entry of `CadDocument::objects` pays: reading a drawing with 70,000 proxy
+  objects peaks at 324 MB instead of 636 MB. Code that matches by reference
+  is unchanged; code that builds these variants wraps the payload in
   `Box::new`, and a pattern that reaches into the payload's fields matches
   the variant first.
 - **Lower DWG read peak** - While the document is built, the DWG reader

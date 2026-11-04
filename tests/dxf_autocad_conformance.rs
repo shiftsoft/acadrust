@@ -81,7 +81,7 @@ fn proxy_object(doc: &mut CadDocument, dwg_version: i32) -> Handle {
         ],
         ..Default::default()
     };
-    doc.objects.insert(handle, ObjectType::ProxyObject(object));
+    doc.objects.insert(handle, ObjectType::ProxyObject(Box::new(object)));
     handle
 }
 
