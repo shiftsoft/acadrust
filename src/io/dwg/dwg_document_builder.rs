@@ -6908,7 +6908,7 @@ impl DwgDocumentBuilder {
                         )
                     } else {
                         crate::objects::ObjectType::ProxyObject(
-                            crate::objects::ProxyObject {
+                            Box::new(crate::objects::ProxyObject {
                                 handle: Handle::from(handle),
                                 owner: owner_handle,
                                 reactors: non_entity_data
@@ -6935,7 +6935,7 @@ impl DwgDocumentBuilder {
                                     ),
                                 object_ids,
                                 dxf_data: Vec::new(),
-                            },
+                            }),
                         )
                     };
                     document.objects.insert(
