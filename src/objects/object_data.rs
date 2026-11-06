@@ -417,13 +417,13 @@ impl CadDocument {
         dictionary.add_entry(next_key(&dictionary.entries), handle);
         self.objects.insert(
             handle,
-            ObjectType::ClassObject(ClassObject {
+            ObjectType::ClassObject(Box::new(ClassObject {
                 handle,
                 owner: xdictionary,
                 reactors: vec![xdictionary],
                 xdictionary_handle: None,
                 data: ClassObjectData::ObjectDataRecord(record),
-            }),
+            })),
         );
         Ok(handle)
     }
@@ -442,14 +442,14 @@ impl CadDocument {
             .entries
             .iter()
             .filter_map(|(_, handle)| match self.objects.get(handle)? {
-                ObjectType::ClassObject(ClassObject {
-                    data: ClassObjectData::ObjectDataRecord(record),
-                    ..
-                }) => Some(ObjectDataAttachment {
-                    record: *handle,
-                    table: record.table,
-                    values: record.values(&self.object_data_table(record.table)?.fields)?,
-                }),
+                ObjectType::ClassObject(object) => match &object.data {
+                    ClassObjectData::ObjectDataRecord(record) => Some(ObjectDataAttachment {
+                        record: *handle,
+                        table: record.table,
+                        values: record.values(&self.object_data_table(record.table)?.fields)?,
+                    }),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect()
@@ -457,20 +457,20 @@ impl CadDocument {
 
     fn object_data_table(&self, descriptor: Handle) -> Option<ObjectDataTable> {
         match self.objects.get(&descriptor)? {
-            ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::ObjectDataDescriptor(descriptor),
-                ..
-            }) => descriptor.as_table(),
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::ObjectDataDescriptor(descriptor) => descriptor.as_table(),
+                _ => None,
+            },
             _ => None,
         }
     }
 
     fn object_data_types(&self, handle: Handle) -> Option<&ObjectDataDictionary> {
         match self.objects.get(&handle)? {
-            ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::ObjectDataDictionary(types),
-                ..
-            }) => Some(types),
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::ObjectDataDictionary(types) => Some(types),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -491,13 +491,13 @@ impl CadDocument {
         let handle = self.allocate_handle();
         self.objects.insert(
             handle,
-            ObjectType::ClassObject(ClassObject {
+            ObjectType::ClassObject(Box::new(ClassObject {
                 handle,
                 owner: root,
                 reactors: vec![root],
                 xdictionary_handle: None,
                 data: ClassObjectData::ObjectDataDictionary(ObjectDataDictionary::default()),
-            }),
+            })),
         );
         if let Some(root) = self.named_objects_dictionary_mut() {
             root.add_entry(OBJECT_DATA_DICTIONARY_KEY, handle);
@@ -516,18 +516,19 @@ impl CadDocument {
         let handle = self.allocate_handle();
         self.objects.insert(
             handle,
-            ObjectType::ClassObject(ClassObject {
+            ObjectType::ClassObject(Box::new(ClassObject {
                 handle,
                 owner: dictionary,
                 reactors: vec![dictionary],
                 xdictionary_handle: None,
                 data: ClassObjectData::ObjectDataDescriptor(descriptor),
-            }),
+            })),
         );
-        if let Some(ObjectType::ClassObject(ClassObject {
-            data: ClassObjectData::ObjectDataDictionary(types),
-            ..
-        })) = self.objects.get_mut(&dictionary)
+        if let Some(ClassObjectData::ObjectDataDictionary(types)) =
+            self.objects.get_mut(&dictionary).and_then(|o| match o {
+                ObjectType::ClassObject(object) => Some(&mut object.data),
+                _ => None,
+            })
         {
             let key = next_key(&types.entries);
             types.entries.push((key, handle));

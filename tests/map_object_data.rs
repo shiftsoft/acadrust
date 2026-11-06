@@ -158,10 +158,14 @@ fn unread_descriptor_payload_is_kept() {
         .objects
         .iter()
         .find_map(|(handle, object)| match object {
-            ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::ObjectDataDescriptor(descriptor),
-                ..
-            }) if descriptor.as_table().is_some() => Some(*handle),
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::ObjectDataDescriptor(descriptor)
+                    if descriptor.as_table().is_some() =>
+                {
+                    Some(*handle)
+                }
+                _ => None,
+            },
             _ => None,
         })
         .unwrap();
@@ -172,10 +176,10 @@ fn unread_descriptor_payload_is_kept() {
     }
     for read in [through_dxf(&document), through_dwg(&document)] {
         let kept = read.objects.values().any(|object| {
-            matches!(object, ObjectType::ClassObject(ClassObject {
-                data: ClassObjectData::ObjectDataDescriptor(descriptor),
-                ..
-            }) if descriptor.payload == payload)
+            matches!(object, ObjectType::ClassObject(object) if matches!(
+                &object.data,
+                ClassObjectData::ObjectDataDescriptor(descriptor) if descriptor.payload == payload
+            ))
         });
         assert!(kept);
     }
@@ -225,10 +229,10 @@ fn missing_descriptor_is_not_referenced() {
             .objects
             .values()
             .find_map(|object| match object {
-                ObjectType::ClassObject(ClassObject {
-                    data: ClassObjectData::ObjectDataDictionary(types),
-                    ..
-                }) => Some(types.entries.clone()),
+                ObjectType::ClassObject(object) => match &object.data {
+                    ClassObjectData::ObjectDataDictionary(types) => Some(types.entries.clone()),
+                    _ => None,
+                },
                 _ => None,
             })
             .unwrap();
