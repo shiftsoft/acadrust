@@ -1117,12 +1117,13 @@ mod object_data_tests {
             table.handle = Handle::new(handle);
             document
                 .objects
-                .insert(table.handle, ObjectType::ClassObject(table));
+                .insert(table.handle, ObjectType::ClassObject(Box::new(table)));
         }
         for object in &objects {
-            document
-                .objects
-                .insert(object.handle, ObjectType::ClassObject(object.clone()));
+            document.objects.insert(
+                object.handle,
+                ObjectType::ClassObject(Box::new(object.clone())),
+            );
         }
         for (object, (_, _, civil3d)) in objects.iter().zip(CIVIL3D) {
             let mut writer = DwgObjectWriter::new(&document).unwrap();
