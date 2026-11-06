@@ -15,8 +15,8 @@ use acadrust::io::dwg::DwgVersion;
 use acadrust::io::read::ReadOutcome;
 use acadrust::objects::{
     DgnLineStyleData, DgnLineStyleObject, DgnLsComponentData, DgnLsComponentType,
-    DgnLsInternalComponent, DgnLsPhaseMode, DgnLsStroke, DgnLsStrokePattern, Dictionary,
-    ObjectType, ProxyObject, ProxyPayload,
+    DgnLsCompoundComponent, DgnLsCompoundEntry, DgnLsInternalComponent, DgnLsPhaseMode,
+    DgnLsStroke, DgnLsStrokePattern, Dictionary, ObjectType, ProxyObject, ProxyPayload,
 };
 use acadrust::tables::LineType;
 use acadrust::types::{DxfVersion, Handle, Vector3};
@@ -290,6 +290,154 @@ fn skipped_dwg_classes_are_neither_decoded_nor_kept() {
             }
         }
     }
+}
+
+/// The fixture with a compound component as the definition's root, which
+/// refers to the stroke, and a second definition that no line type owns,
+/// which refers to the internal component.
+fn reach_fixture(version: DxfVersion) -> (Fixture, Handle, Handle) {
+    let mut fixture = fixture(version);
+    let document = &mut fixture.document;
+    let compound = document.allocate_handle();
+    let stray = document.allocate_handle();
+    let components = fixture.components;
+    if let Some(ObjectType::Dictionary(store)) = document.objects.get_mut(&components) {
+        store.add_entry("{COMPOUND}", compound);
+        store.add_entry("{STRAY}", stray);
+    }
+    document.objects.insert(
+        compound,
+        ObjectType::DgnLineStyle(DgnLineStyleObject {
+            handle: compound,
+            owner: components,
+            reactors: vec![components],
+            xdictionary_handle: None,
+            data: component(
+                DgnLsComponentType::Compound,
+                DgnLsComponentData::Compound(DgnLsCompoundComponent {
+                    entries: vec![DgnLsCompoundEntry {
+                        component: fixture.stroke,
+                        offset: 0.5,
+                    }],
+                }),
+            ),
+        }),
+    );
+    let mut definition = match document.objects.get(&fixture.definition) {
+        Some(ObjectType::DgnLineStyle(definition)) => definition.clone(),
+        other => panic!("definition missing: {other:?}"),
+    };
+    if let DgnLineStyleData::Definition { root_component, .. } = &mut definition.data {
+        *root_component = compound;
+    }
+    let mut unowned = definition.clone();
+    document
+        .objects
+        .insert(fixture.definition, ObjectType::DgnLineStyle(definition));
+    unowned.handle = stray;
+    unowned.owner = components;
+    unowned.reactors = vec![components];
+    if let DgnLineStyleData::Definition { root_component, .. } = &mut unowned.data {
+        *root_component = fixture.internal;
+    }
+    document
+        .objects
+        .insert(stray, ObjectType::DgnLineStyle(unowned));
+    (fixture, compound, stray)
+}
+
+#[test]
+fn records_a_line_type_reaches_are_read_and_the_rest_skipped() {
+    for version in [DxfVersion::AC1027, DxfVersion::AC1032] {
+        let (fixture, compound, stray) = reach_fixture(version);
+        let bytes = DwgWriter::write_to_vec(&fixture.document).unwrap();
+        let full = read_dwg(&bytes, DwgReadOptions::default());
+        assert_eq!(dgn_records(&full.document), 5, "{version:?}: fixture");
+        let classes = [
+            "LSDEFINITION",
+            "LSCOMPOUNDCOMPONENT",
+            "LSSTROKEPATTERNCOMPONENT",
+            "LSINTERNALCOMPONENT",
+        ];
+        for failsafe in [false, true] {
+            let options = DwgReadOptions {
+                failsafe,
+                ..DwgReadOptions::default().with_skipped_unreached_object_classes(classes)
+            };
+            let read = read_dwg(&bytes, options);
+            let document = &read.document;
+            let context = format!("{version:?} failsafe={failsafe}");
+            // The line type's definition, its root and the stroke the root
+            // refers to are read as in a full read.
+            for handle in [fixture.definition, compound, fixture.stroke] {
+                assert_eq!(
+                    document.objects.get(&handle),
+                    full.document.objects.get(&handle),
+                    "{context}: {handle:?}"
+                );
+            }
+            assert_eq!(document.dgn_ls_definitions.len(), 1, "{context}");
+            assert_eq!(document.dgn_ls_components.len(), 2, "{context}");
+            // A definition the line type does not own, and the component
+            // only it refers to, are left out.
+            for handle in [stray, fixture.internal] {
+                assert!(!document.objects.contains_key(&handle), "{context}");
+            }
+            assert_eq!(
+                read.stats.skipped_object_classes,
+                counts(&[("LSDEFINITION", 1), ("LSINTERNALCOMPONENT", 1)]),
+                "{context}"
+            );
+            assert_eq!(read.stats.skipped_source_records, 0, "{context}");
+            assert_eq!(document.notifications.error_count(), 0, "{context}");
+            let extension = document
+                .extension_dictionary_handle(fixture.linetype)
+                .expect("linetype extension dictionary");
+            assert_eq!(
+                entries(document, extension),
+                vec![("DGNLSDEF".to_string(), fixture.definition)],
+                "{context}"
+            );
+            let kept: Vec<String> = entries(document, fixture.components)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            assert_eq!(kept, ["{STROKE}", "{COMPOUND}"], "{context}");
+        }
+    }
+}
+
+#[test]
+fn without_a_line_type_reaching_them_the_classes_are_all_skipped() {
+    let (mut fixture, _, _) = reach_fixture(DxfVersion::AC1032);
+    // The definition now hangs in the components dictionary, as in the
+    // drawings that carry components and no definition a line type owns.
+    let components = fixture.components;
+    if let Some(ObjectType::DgnLineStyle(definition)) =
+        fixture.document.objects.get_mut(&fixture.definition)
+    {
+        definition.owner = components;
+        definition.reactors = vec![components];
+    }
+    let bytes = DwgWriter::write_to_vec(&fixture.document).unwrap();
+    let classes = DGN_CLASSES.iter().copied().chain(["LSCOMPOUNDCOMPONENT"]);
+    let reached = read_dwg(
+        &bytes,
+        DwgReadOptions::default().with_skipped_unreached_object_classes(classes.clone()),
+    );
+    let skipped = read_dwg(
+        &bytes,
+        DwgReadOptions::default().with_skipped_object_classes(classes),
+    );
+    assert_eq!(dgn_records(&reached.document), 0);
+    assert_eq!(
+        reached.stats.skipped_object_classes,
+        skipped.stats.skipped_object_classes
+    );
+    assert_eq!(
+        reached.document.objects.len(),
+        skipped.document.objects.len()
+    );
 }
 
 #[test]

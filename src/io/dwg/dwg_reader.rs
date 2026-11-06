@@ -359,6 +359,35 @@ pub struct DwgReadOptions {
     /// so a save writes the drawing without those records. Empty by default.
     #[cfg_attr(feature = "serde", serde(default))]
     pub skip_object_classes: Vec<String>,
+
+    /// DXF names of non-graphical object classes whose records are left out
+    /// of the read as in [`Self::skip_object_classes`], except the records
+    /// a line type reaches.
+    ///
+    /// A record of one of these classes is reached when its owner is the
+    /// extension dictionary of a line type (an `LTYPE` table record), or
+    /// when a reached record refers to it, followed to any depth. A
+    /// reference is a handle the class decoder reads: the root component of
+    /// an `LSDEFINITION`, the components of an `LSCOMPOUNDCOMPONENT` or an
+    /// `LSPOINTCOMPONENT`. A record of a class without such a decoder is
+    /// reached through its owner only.
+    ///
+    /// The reached records are decoded and stored as any other; the rest
+    /// are not decoded, and are counted in
+    /// [`ReadStats::skipped_object_classes`](crate::io::read::ReadStats::skipped_object_classes)
+    /// as for `skip_object_classes`. A proxy object standing for one of
+    /// these classes is always left out. Finding the reached records reads
+    /// the owner of every record of these classes once and keeps nothing
+    /// for the records that are not reached.
+    ///
+    /// A drawing converted from MicroStation names its line styles this
+    /// way: each `LTYPE` it uses has an extension dictionary that owns an
+    /// `LSDEFINITION`, whose component tree describes how lines of that
+    /// type are drawn. Such a drawing can hold hundreds of thousands of
+    /// components no line type reaches. DWG only: the DXF reader does not
+    /// read this option. Empty by default.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub skip_unreached_object_classes: Vec<String>,
 }
 
 impl Default for DwgReadOptions {
@@ -371,6 +400,7 @@ impl Default for DwgReadOptions {
             password: None,
             defer_solid_reference_point: false,
             skip_object_classes: Vec::new(),
+            skip_unreached_object_classes: Vec::new(),
         }
     }
 }
@@ -427,6 +457,19 @@ impl DwgReadOptions {
         S: Into<String>,
     {
         self.skip_object_classes = names.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Leave the records of these object classes out of the read, but for
+    /// those a line type reaches.
+    ///
+    /// See [`Self::skip_unreached_object_classes`].
+    pub fn with_skipped_unreached_object_classes<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.skip_unreached_object_classes = names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -1854,6 +1897,9 @@ impl<R: Read + Seek> DwgReader<R> {
                         let mut builder = crate::io::dwg::dwg_document_builder::DwgDocumentBuilder::new(obj_reader);
                         builder.set_failsafe(failsafe);
                         builder.set_skipped_object_classes(&self.options.skip_object_classes);
+                        builder.set_skipped_unreached_object_classes(
+                            &self.options.skip_unreached_object_classes,
+                        );
                         if let Some(progress) = &self.progress {
                             builder.set_progress_callback(progress.clone());
                         }

@@ -580,6 +580,20 @@ impl Pass2Output {
     }
 }
 
+/// Whether a class DXF name, in upper case, is one of the MicroStation line
+/// style classes that `dgn_linestyle` decodes.
+fn is_dgn_line_style_class(upper: &str) -> bool {
+    matches!(
+        upper,
+        "LSDEFINITION"
+            | "LSSYMBOLCOMPONENT"
+            | "LSCOMPOUNDCOMPONENT"
+            | "LSSTROKEPATTERNCOMPONENT"
+            | "LSPOINTCOMPONENT"
+            | "LSINTERNALCOMPONENT"
+    )
+}
+
 /// The records the caller asked to leave out
 /// ([`DwgDocumentBuilder::set_skipped_object_classes`]).
 #[derive(Default)]
@@ -797,6 +811,9 @@ pub struct DwgDocumentBuilder {
     failsafe: bool,
     /// DXF names of object classes whose records are not decoded.
     skip_object_classes: Vec<String>,
+    /// DXF names of object classes whose records are not decoded unless a
+    /// line type reaches them.
+    skip_unreached_object_classes: Vec<String>,
     /// Notifications collected during building.
     notifications: NotificationCollection,
     /// Shared with `DwgReader`; reports the object-build portion of the
@@ -832,6 +849,7 @@ impl DwgDocumentBuilder {
             obj_reader,
             failsafe: false,
             skip_object_classes: Vec::new(),
+            skip_unreached_object_classes: Vec::new(),
             notifications: NotificationCollection::new(),
             progress: None,
         }
@@ -849,6 +867,127 @@ impl DwgDocumentBuilder {
     /// name. See [`crate::DwgReadOptions::skip_object_classes`].
     pub fn set_skipped_object_classes(&mut self, names: &[String]) {
         self.skip_object_classes = names.to_vec();
+    }
+
+    /// Leave out the records of these non-graphical object classes, by DXF
+    /// name, but for those a line type reaches. See
+    /// [`crate::DwgReadOptions::skip_unreached_object_classes`].
+    pub fn set_skipped_unreached_object_classes(&mut self, names: &[String]) {
+        self.skip_unreached_object_classes = names.to_vec();
+    }
+
+    /// The records of `classes` that a line type reaches: those owned by the
+    /// extension dictionary of a line type, and the records of `classes`
+    /// they refer to, followed to the end. Only these records are read; the
+    /// rest are never decoded, so a drawing that holds hundreds of thousands
+    /// of them pays for the few it uses.
+    ///
+    /// A record's references are the handles its class decoder reads: the
+    /// root component of a DGN line style definition, the components of a
+    /// compound or point component. A record of a class without such a
+    /// decoder is reached through its owner only.
+    fn reached_from_line_types(
+        &self,
+        document: &CadDocument,
+        record_catalog: &[(u64, usize, i16, i16)],
+        classes: &HashMap<i16, String>,
+    ) -> HashSet<u64> {
+        let mut reached = HashSet::new();
+        if classes.is_empty() {
+            return reached;
+        }
+        let roots: HashSet<u64> = document
+            .line_types
+            .iter()
+            .filter_map(|line_type| document.xdic_by_handle.get(&line_type.handle))
+            .map(|handle| handle.value())
+            .filter(|&handle| handle != 0)
+            .collect();
+        if roots.is_empty() {
+            return reached;
+        }
+        // The catalog is in handle order, so a record is found by a binary
+        // search and nothing is held per candidate: a drawing can hold
+        // 600,000 of them.
+        let candidate = |handle: u64| {
+            let index = record_catalog
+                .binary_search_by_key(&handle, |record| record.0)
+                .ok()?;
+            let record = record_catalog[index];
+            classes.contains_key(&record.2).then_some(record)
+        };
+        // The owner of each candidate is read in chunks, and only the
+        // handles of the records a line type owns are kept.
+        const OWNER_CHUNK: usize = 1 << 14;
+        let mut queue: Vec<u64> = map_chunks(record_catalog, OWNER_CHUNK, |records| {
+            records
+                .iter()
+                .filter(|&&(handle, offset, raw_type_code, type_code)| {
+                    if !classes.contains_key(&raw_type_code) {
+                        return false;
+                    }
+                    let Ok((_, mut reader)) = self.obj_reader.read_record_at(offset) else {
+                        return false;
+                    };
+                    let common = self
+                        .obj_reader
+                        .read_common_non_entity_data(&mut reader, type_code);
+                    common.common.handle == handle
+                        && reader.check_error().is_ok()
+                        && roots.contains(&common.owner_handle)
+                })
+                .map(|record| record.0)
+                .collect::<Vec<_>>()
+        })
+        .into_iter()
+        .flatten()
+        .collect();
+        while let Some(handle) = queue.pop() {
+            if !reached.insert(handle) {
+                continue;
+            }
+            let Some((_, offset, raw_type_code, type_code)) = candidate(handle) else {
+                continue;
+            };
+            let name = classes.get(&raw_type_code).map_or("", String::as_str);
+            for reference in self.record_references(offset, type_code, name) {
+                if !reached.contains(&reference) && candidate(reference).is_some() {
+                    queue.push(reference);
+                }
+            }
+        }
+        reached
+    }
+
+    /// The records a non-graphical record refers to, as its class decoder
+    /// reads them. See [`Self::reached_from_line_types`].
+    fn record_references(&self, offset: usize, type_code: i16, dxf_name: &str) -> Vec<u64> {
+        use crate::io::dwg::dwg_stream_readers::object_reader::dgn_linestyle::read_dgn_line_style_data;
+        use crate::objects::DgnLineStyleData;
+        let Ok((_, mut reader)) = self.obj_reader.read_record_at(offset) else {
+            return Vec::new();
+        };
+        let _ = self
+            .obj_reader
+            .read_common_non_entity_data(&mut reader, type_code);
+        if reader.check_error().is_err() {
+            return Vec::new();
+        }
+        let upper = dxf_name.to_ascii_uppercase();
+        if !is_dgn_line_style_class(&upper) {
+            return Vec::new();
+        }
+        match read_dgn_line_style_data(&mut reader, &upper) {
+            Some(DgnLineStyleData::Definition { root_component, .. }) => {
+                vec![root_component.value()]
+            }
+            Some(DgnLineStyleData::Component { component, .. }) => component
+                .references()
+                .into_iter()
+                .map(|handle| handle.value())
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     pub fn set_progress_callback(&mut self, progress: std::sync::Arc<dyn Fn(u16) + Send + Sync>) {
@@ -2280,25 +2419,39 @@ impl DwgDocumentBuilder {
         // the source, and their handles must stay unused. A proxy object
         // standing for one of these classes is left out too, in pass 2, once
         // its class number is read.
-        let mut skipped = SkippedRecords {
-            classes: document
+        //
+        // The classes skipped unless a line type reaches them are left out
+        // the same way, but for the records `reached_from_line_types` finds,
+        // which pass 2 reads as any other.
+        let skippable = |names: &[String]| -> HashMap<i16, String> {
+            document
                 .classes
                 .iter()
                 .filter(|class| {
                     class.class_number >= 500
                         && !class.is_an_entity
-                        && self
-                            .skip_object_classes
+                        && names
                             .iter()
                             .any(|name| name.eq_ignore_ascii_case(&class.dxf_name))
                 })
                 .map(|class| (class.class_number, class.dxf_name.clone()))
-                .collect(),
+                .collect()
+        };
+        let unreached_classes = skippable(&self.skip_unreached_object_classes);
+        let reached = self.reached_from_line_types(document, &record_catalog, &unreached_classes);
+        let mut skipped = SkippedRecords {
+            classes: skippable(&self.skip_object_classes),
             handles: HashSet::new(),
         };
+        for (number, name) in unreached_classes {
+            skipped.classes.entry(number).or_insert(name);
+        }
         let mut skipped_object_classes = std::collections::BTreeMap::<String, usize>::new();
         for (handle, _, raw_type_code, _) in &record_catalog {
             if let Some(name) = skipped.classes.get(raw_type_code) {
+                if reached.contains(handle) {
+                    continue;
+                }
                 *skipped_object_classes.entry(name.clone()).or_default() += 1;
                 skipped.handles.insert(*handle);
             }
@@ -2307,8 +2460,9 @@ impl DwgDocumentBuilder {
         // Pass 2 reads every catalogued record but the table records and the
         // skipped classes. It walks the catalog itself: a filtered copy would
         // hold 24 bytes per record through the whole pass.
-        let in_pass2 = |&(_, _, raw_type_code, type_code): &(u64, usize, i16, i16)| {
-            !skipped.classes.contains_key(&raw_type_code) && !is_table_type(type_code)
+        let in_pass2 = |&(handle, _, raw_type_code, type_code): &(u64, usize, i16, i16)| {
+            (!skipped.classes.contains_key(&raw_type_code) || reached.contains(&handle))
+                && !is_table_type(type_code)
         };
         let pass2_count = record_catalog.iter().filter(|r| in_pass2(r)).count();
         // LIGHT's optional IES/photometric tail is controlled by the
@@ -7383,15 +7537,7 @@ impl DwgDocumentBuilder {
                             }
                         }
                         let class_name_upper = dxf_name.to_uppercase();
-                        if matches!(
-                            class_name_upper.as_str(),
-                            "LSDEFINITION"
-                                | "LSSYMBOLCOMPONENT"
-                                | "LSCOMPOUNDCOMPONENT"
-                                | "LSSTROKEPATTERNCOMPONENT"
-                                | "LSPOINTCOMPONENT"
-                                | "LSINTERNALCOMPONENT"
-                        ) {
+                        if is_dgn_line_style_class(&class_name_upper) {
                             let h = Handle::from(handle);
                             let Some(data) =
                                 crate::io::dwg::dwg_stream_readers::object_reader::dgn_linestyle::read_dgn_line_style_data(
