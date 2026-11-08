@@ -762,12 +762,24 @@ fn normalize_entity_for_comparison(entity: &mut EntityType) {
     }
 
     // ── Case-normalize style names (DWG may return different case) ──
+    // The style record's handle, which a DWG read gives a text and a
+    // programmatic one need not have, is compared by its name.
     match entity {
         EntityType::Text(t) => {
             t.style = t.style.to_uppercase();
+            t.style_handle = None;
         }
         EntityType::MText(m) => {
             m.style = m.style.to_uppercase();
+            m.style_handle = None;
+        }
+        EntityType::AttributeDefinition(a) => {
+            a.style_handle = None;
+        }
+        EntityType::Insert(i) => {
+            for a in &mut i.attributes {
+                a.style_handle = None;
+            }
         }
         EntityType::Leader(l) => {
             l.dimension_style = l.dimension_style.to_uppercase();

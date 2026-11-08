@@ -1,7 +1,7 @@
 //! Multi-line text entity
 
 use super::{Entity, EntityCommon, LineSpacingStyle};
-use crate::types::{BoundingBox3D, Color, Vector3};
+use crate::types::{BoundingBox3D, Color, Handle, Vector3};
 
 /// Attachment point for MText
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,6 +232,10 @@ pub struct MText {
     pub dwg_x_direction: Option<Vector3>,
     /// Text style name
     pub style: String,
+    /// The text style record the file names by handle (DWG), when it does:
+    /// a drawing can hold two records of one name, which `style` cannot tell
+    /// apart. `None` for a text read from DXF or made in code.
+    pub style_handle: Option<Handle>,
     /// Attachment point
     pub attachment_point: AttachmentPoint,
     /// Drawing direction
@@ -279,6 +283,7 @@ impl MText {
             rotation: 0.0,
             dwg_x_direction: None,
             style: "Standard".to_string(),
+            style_handle: None,
             attachment_point: AttachmentPoint::TopLeft,
             drawing_direction: DrawingDirection::LeftToRight,
             line_spacing_factor: 1.0,

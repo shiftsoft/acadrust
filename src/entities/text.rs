@@ -1,7 +1,7 @@
 //! Text entity
 
 use super::{Entity, EntityCommon};
-use crate::types::{BoundingBox3D, Vector3};
+use crate::types::{BoundingBox3D, Handle, Vector3};
 
 pub(crate) fn estimated_width_in_heights(s: &str) -> f64 {
     s.chars()
@@ -72,6 +72,10 @@ pub struct Text {
     pub oblique_angle: f64,
     /// Text style name
     pub style: String,
+    /// The text style record the file names by handle (DWG), when it does:
+    /// a drawing can hold two records of one name, which `style` cannot tell
+    /// apart. `None` for a text read from DXF or made in code.
+    pub style_handle: Option<Handle>,
     /// Horizontal alignment
     pub horizontal_alignment: TextHorizontalAlignment,
     /// Vertical alignment
@@ -98,6 +102,7 @@ impl Text {
             width_factor: 1.0,
             oblique_angle: 0.0,
             style: "Standard".to_string(),
+            style_handle: None,
             horizontal_alignment: TextHorizontalAlignment::Left,
             vertical_alignment: TextVerticalAlignment::Baseline,
             normal: Vector3::UNIT_Z,
