@@ -133,6 +133,7 @@ pub(super) fn explode_mtext(mtext: &MText) -> Vec<EntityType> {
                 width_factor: 1.0,
                 oblique_angle: 0.0,
                 style: mtext.style.clone(),
+                style_handle: mtext.style_handle,
                 horizontal_alignment: horizontal,
                 vertical_alignment: TextVerticalAlignment::Baseline,
                 normal: mtext.normal,
@@ -196,6 +197,7 @@ pub(super) fn explode_formatted_mtext(
                 width_factor,
                 oblique_angle: 0.0,
                 style: mtext.style.clone(),
+                style_handle: mtext.style_handle,
                 horizontal_alignment: TextHorizontalAlignment::Left,
                 vertical_alignment: TextVerticalAlignment::Baseline,
                 normal: mtext.normal,
@@ -205,6 +207,7 @@ pub(super) fn explode_formatted_mtext(
             if let Some(font) = span.properties.font.as_ref() {
                 if !font.name.is_empty() {
                     text.style = font.name.clone();
+                    text.style_handle = None;
                 }
             }
             if let Some(color) = span.properties.color {

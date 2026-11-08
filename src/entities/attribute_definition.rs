@@ -1,7 +1,7 @@
 //! AttributeDefinition entity - Block attribute template
 
 use crate::entities::{Entity, EntityCommon};
-use crate::types::{BoundingBox3D, Color, Vector3};
+use crate::types::{BoundingBox3D, Color, Handle, Vector3};
 use std::f64::consts::PI;
 
 /// Attribute flags
@@ -210,6 +210,10 @@ pub struct AttributeDefinition {
     pub oblique_angle: f64,
     /// Text style name
     pub text_style: String,
+    /// The text style record the file names by handle (DWG), when it does:
+    /// a drawing can hold two records of one name, which `text_style` cannot tell
+    /// apart. `None` for a text read from DXF or made in code.
+    pub style_handle: Option<Handle>,
     /// Text generation flags
     pub text_generation_flags: i16,
     /// Horizontal alignment
@@ -253,6 +257,7 @@ impl AttributeDefinition {
             width_factor: 1.0,
             oblique_angle: 0.0,
             text_style: "Standard".to_string(),
+            style_handle: None,
             text_generation_flags: 0,
             horizontal_alignment: HorizontalAlignment::Left,
             vertical_alignment: VerticalAlignment::Baseline,
@@ -313,6 +318,7 @@ impl AttributeDefinition {
     /// Set the text style
     pub fn set_text_style(&mut self, style: impl Into<String>) {
         self.text_style = style.into();
+        self.style_handle = None;
     }
 
     /// Set the alignment
@@ -390,6 +396,7 @@ impl AttributeDefinition {
     /// Builder: Set text style
     pub fn with_text_style(mut self, style: impl Into<String>) -> Self {
         self.text_style = style.into();
+        self.style_handle = None;
         self
     }
 

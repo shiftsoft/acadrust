@@ -753,6 +753,12 @@ impl HandleMaps {
     }
 }
 
+/// A text's style record by handle, which tells apart two records of one
+/// name; `None` for the null handle.
+fn style_handle(handle: u64) -> Option<Handle> {
+    (handle != 0).then(|| Handle::from(handle))
+}
+
 fn mtext_from_data(data: entities::MTextData, common: EntityCommon, maps: &HandleMaps) -> MText {
     let mut e = MText::new();
     e.common = common;
@@ -801,6 +807,7 @@ fn mtext_from_data(data: entities::MTextData, common: EntityCommon, maps: &Handl
         heights: data.column_heights,
     };
     e.style = maps.style_name(data.style_handle);
+    e.style_handle = style_handle(data.style_handle);
     e
 }
 
@@ -1897,6 +1904,10 @@ impl DwgDocumentBuilder {
         {
             let _ = document.layers.remove("0");
         }
+        // The text style records read so far, by handle: a record of a name
+        // the file already gave is kept beside it, while the document's own
+        // default of that name is replaced.
+        let mut file_styles: HashSet<u64> = HashSet::new();
         for entry in &parsed_entries {
             match entry {
                 ParsedEntry::Layer(h, data) => {
@@ -2045,10 +2056,18 @@ impl DwgDocumentBuilder {
                     // Only mark xref-dependent if the xref block record handle is valid
                     style.xref_dependent = data.xref_dependent && data.xref_handle != 0;
                     style.xref_block_record_handle = Handle::from(data.xref_handle);
-                    // Use add_allow_duplicate for shape-file-only styles (empty name)
-                    // so multiple empty-named styles are preserved. Named styles use
-                    // add_or_replace to avoid duplicates (e.g. "Standard").
-                    if data.name.is_empty() {
+                    // Every record the file holds is kept: shape-file styles have
+                    // no name and a drawing can hold several, and a drawing can
+                    // also hold two records of one name, each named by handle
+                    // by its texts (`Text::style_handle`), which may use another
+                    // font. Only the document's own default of a name (e.g.
+                    // "Standard") gives way to the file's record.
+                    let from_file = document
+                        .text_styles
+                        .get(&data.name)
+                        .is_some_and(|s| file_styles.contains(&s.handle.value()));
+                    file_styles.insert(*h);
+                    if data.name.is_empty() || from_file {
                         document.text_styles.add_allow_duplicate(style);
                     } else {
                         document.text_styles.add_or_replace(style);
@@ -4894,6 +4913,7 @@ impl DwgDocumentBuilder {
                     e.width_factor = data.width_factor;
                     e.normal = data.normal;
                     e.style = maps.style_name(data.style_handle);
+                    e.style_handle = style_handle(data.style_handle);
                     e.thickness = data.thickness;
                     e.generation_flags = data.generation;
                     let _ = document.add_entity(EntityType::Text(e));
@@ -5587,6 +5607,7 @@ impl DwgDocumentBuilder {
                     e.oblique_angle = data.text_data.oblique_angle;
                     e.normal = data.text_data.normal;
                     e.text_style = maps.style_name(data.text_data.style_handle);
+                    e.style_handle = style_handle(data.text_data.style_handle);
                     e.flags = AttributeFlags::from_bits(data.flags as i32);
                     e.text_generation_flags = data.text_data.generation;
                     e.field_length = data.field_length;
@@ -5643,6 +5664,7 @@ impl DwgDocumentBuilder {
                     e.oblique_angle = data.text_data.oblique_angle;
                     e.normal = data.text_data.normal;
                     e.text_style = maps.style_name(data.text_data.style_handle);
+                    e.style_handle = style_handle(data.text_data.style_handle);
                     // Carry the flag byte the reader parsed. Dropping it left
                     // `flags.invisible` false, so an attribute tagged invisible
                     // (ATTMODE 1 should hide it) was still drawn. Also carry the

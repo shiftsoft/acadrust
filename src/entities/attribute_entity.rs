@@ -54,6 +54,10 @@ pub struct AttributeEntity {
     pub oblique_angle: f64,
     /// Text style name
     pub text_style: String,
+    /// The text style record the file names by handle (DWG), when it does:
+    /// a drawing can hold two records of one name, which `text_style` cannot tell
+    /// apart. `None` for a text read from DXF or made in code.
+    pub style_handle: Option<Handle>,
     /// Text generation flags
     pub text_generation_flags: i16,
     /// Horizontal alignment
@@ -98,6 +102,7 @@ impl AttributeEntity {
             width_factor: 1.0,
             oblique_angle: 0.0,
             text_style: "Standard".to_string(),
+            style_handle: None,
             text_generation_flags: 0,
             horizontal_alignment: HorizontalAlignment::Left,
             vertical_alignment: VerticalAlignment::Baseline,
@@ -147,6 +152,7 @@ impl AttributeEntity {
             width_factor: attdef.width_factor,
             oblique_angle: attdef.oblique_angle,
             text_style: attdef.text_style.clone(),
+            style_handle: attdef.style_handle,
             text_generation_flags: attdef.text_generation_flags,
             horizontal_alignment: attdef.horizontal_alignment,
             vertical_alignment: attdef.vertical_alignment,
@@ -207,6 +213,7 @@ impl AttributeEntity {
     /// Set the text style
     pub fn set_text_style(&mut self, style: impl Into<String>) {
         self.text_style = style.into();
+        self.style_handle = None;
     }
 
     /// Set the alignment
@@ -299,6 +306,7 @@ impl AttributeEntity {
     /// Builder: Set text style
     pub fn with_text_style(mut self, style: impl Into<String>) -> Self {
         self.text_style = style.into();
+        self.style_handle = None;
         self
     }
 

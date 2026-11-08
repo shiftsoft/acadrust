@@ -28,6 +28,21 @@ struct ArchitectureRecordBody {
 }
 
 impl<'a> DwgObjectWriter<'a> {
+    /// The text style record a text names: the one of `handle` when the
+    /// table holds it under that name, as a drawing with two records of one
+    /// name needs, else the record of the name; null when there is none.
+    fn text_style_ref(&self, name: &str, handle: Option<Handle>) -> Handle {
+        let styles = &self.document.text_styles;
+        handle
+            .filter(|h| {
+                styles
+                    .iter()
+                    .any(|s| s.handle == *h && s.name.eq_ignore_ascii_case(name))
+            })
+            .or_else(|| styles.get(name).map(|s| s.handle))
+            .unwrap_or(Handle::NULL)
+    }
+
     fn architecture_record_body(
         data: &crate::classes::arch::ArchEntityData,
         version: crate::types::DxfVersion,
@@ -931,12 +946,7 @@ impl<'a> DwgObjectWriter<'a> {
         }
 
         // Style handle
-        let style_handle = self
-            .document
-            .text_styles
-            .get(&e.style)
-            .map(|s| s.handle)
-            .unwrap_or(Handle::NULL);
+        let style_handle = self.text_style_ref(&e.style, e.style_handle);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, style_handle.value());
 
@@ -1004,12 +1014,7 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer.write_variable_text(&e.value);
 
         // H 7 STYLE (hard pointer) — written BEFORE R2000+ block
-        let style_handle = self
-            .document
-            .text_styles
-            .get(&e.style)
-            .map(|s| s.handle)
-            .unwrap_or(Handle::NULL);
+        let style_handle = self.text_style_ref(&e.style, e.style_handle);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, style_handle.value());
 
@@ -1439,12 +1444,7 @@ impl<'a> DwgObjectWriter<'a> {
         );
 
         // Common TEXT style precedes embedded MTEXT handles (ODA 20.4.4).
-        let style_handle = self
-            .document
-            .text_styles
-            .get(&att.text_style)
-            .map(|s| s.handle)
-            .unwrap_or(Handle::NULL);
+        let style_handle = self.text_style_ref(&att.text_style, att.style_handle);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, style_handle.value());
 
@@ -4852,12 +4852,7 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer.write_bit_double(mtext.extents_height);
         self.writer.write_variable_text(&mtext.value);
 
-        let style_handle = self
-            .document
-            .text_styles
-            .get(&mtext.style)
-            .map(|text_style| text_style.handle)
-            .unwrap_or(Handle::NULL);
+        let style_handle = self.text_style_ref(&mtext.style, mtext.style_handle);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, style_handle.value());
         self.writer.write_bit_short(mtext.line_spacing_style as i16);
@@ -4929,12 +4924,7 @@ impl<'a> DwgObjectWriter<'a> {
         );
 
         // Common TEXT style precedes embedded MTEXT handles (ODA 20.4.4).
-        let style_handle = self
-            .document
-            .text_styles
-            .get(&e.text_style)
-            .map(|s| s.handle)
-            .unwrap_or(Handle::NULL);
+        let style_handle = self.text_style_ref(&e.text_style, e.style_handle);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, style_handle.value());
 
@@ -5011,12 +5001,7 @@ impl<'a> DwgObjectWriter<'a> {
         );
 
         // Common TEXT style precedes embedded MTEXT handles (ODA 20.4.4).
-        let style_handle = self
-            .document
-            .text_styles
-            .get(&e.text_style)
-            .map(|s| s.handle)
-            .unwrap_or(Handle::NULL);
+        let style_handle = self.text_style_ref(&e.text_style, e.style_handle);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, style_handle.value());
 
