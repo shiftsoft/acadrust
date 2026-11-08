@@ -777,6 +777,9 @@ fn clean_dict_key(name: String) -> String {
     }
 }
 
+/// Entries reserved before a dictionary is read; a dictionary of more grows.
+const RESERVED_ENTRIES: usize = 1024;
+
 pub fn read_dictionary(reader: &mut DwgMergedReader, version: DwgVersion) -> DictionaryData {
     read_dictionary_where(reader, version, |_| true)
 }
@@ -800,7 +803,8 @@ pub fn read_dictionary_where(
         hard_owner = reader.read_byte() != 0;
     }
 
-    let mut entries = Vec::with_capacity(num_entries as usize);
+    // The count is not reserved: most entries may be dropped.
+    let mut entries = Vec::with_capacity((num_entries as usize).min(RESERVED_ENTRIES));
     for _ in 0..num_entries {
         let name = clean_dict_key(reader.read_variable_text());
         let handle = reader.read_handle();
@@ -831,7 +835,8 @@ pub fn read_dictionary_with_default_where(
     let duplicate_cloning = reader.read_bit_short();
     let hard_owner = reader.read_byte() != 0;
 
-    let mut entries = Vec::with_capacity(num_entries as usize);
+    // The count is not reserved: most entries may be dropped.
+    let mut entries = Vec::with_capacity((num_entries as usize).min(RESERVED_ENTRIES));
     for _ in 0..num_entries {
         let name = clean_dict_key(reader.read_variable_text());
         let handle = reader.read_handle();

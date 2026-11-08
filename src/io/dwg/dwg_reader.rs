@@ -39,6 +39,7 @@ use crate::io::dwg::decompressor_ac18::decompress_ac18;
 use crate::io::dwg::decompressor_ac21::decompress_ac21;
 use crate::io::dwg::dwg21_metadata::Dwg21CompressedMetadata;
 use crate::io::dwg::dwg_version::DwgVersion;
+use crate::io::dwg::object_section::{ObjectSection, Page, PagedSection};
 use crate::io::dwg::parallel::{map_ordered, worker_count};
 use crate::io::dwg::reed_solomon::reed_solomon_decode;
 use crate::io::dwg::shard_plan::ShardState;
@@ -1873,9 +1874,7 @@ impl<R: Read + Seek> DwgReader<R> {
         if !handle_map.is_empty() {
             let objects_buf = match cached_objects {
                 Some(objects) => Ok(objects),
-                None => self
-                    .get_section_buffer("AcDb:AcDbObjects", &info)
-                    .map(std::sync::Arc::new),
+                None => self.get_object_section(&info).map(std::sync::Arc::new),
             };
             match objects_buf {
                 Ok(objects_buf) => {
@@ -3512,6 +3511,33 @@ impl<R: Read + Seek> DwgReader<R> {
         section_name: &str,
         info: &DwgFileHeaderInfo,
     ) -> Result<Vec<u8>, DxfError> {
+        match self.read_section_ac18(section_name, info, false)? {
+            ObjectSection::Whole(bytes) => {
+                Ok(std::sync::Arc::try_unwrap(bytes).unwrap_or_else(|shared| (*shared).clone()))
+            }
+            ObjectSection::Paged(_) => unreachable!("a whole section was asked for"),
+        }
+    }
+
+    /// The object section: an R2004 and later file's kept as its compressed
+    /// pages (see [`ObjectSection`]), any other whole.
+    fn get_object_section(&mut self, info: &DwgFileHeaderInfo) -> Result<ObjectSection, DxfError> {
+        const NAME: &str = "AcDb:AcDbObjects";
+        if info.section_locators.is_empty() && info.is_ac18_format {
+            self.read_section_ac18(NAME, info, true)
+        } else {
+            self.get_section_buffer(NAME, info).map(ObjectSection::from)
+        }
+    }
+
+    /// The section `section_name` of an AC18 file, whole, or with `paged`
+    /// as its compressed pages.
+    fn read_section_ac18(
+        &mut self,
+        section_name: &str,
+        info: &DwgFileHeaderInfo,
+        paged: bool,
+    ) -> Result<ObjectSection, DxfError> {
         let failsafe = self.options.failsafe;
         let section = info
             .section_descriptors
@@ -3564,12 +3590,22 @@ impl<R: Read + Seek> DwgReader<R> {
             );
         }
 
-        self.charge_decompressed_bytes(
-            total_size,
-            format_args!("AC18 section '{}'", section_name),
-        )?;
-        let mut result =
-            try_zeroed_vec(total_size, format_args!("AC18 section '{}'", section_name))?;
+        // A paged section holds its pages as stored and a cache of
+        // decompressed ones, and is charged for those as they are read.
+        let mut result = if paged {
+            self.charge_decompressed_bytes(
+                PagedSection::cache_bytes(max_page_size).min(total_size),
+                format_args!("AC18 section '{}' page cache", section_name),
+            )?;
+            Vec::new()
+        } else {
+            self.charge_decompressed_bytes(
+                total_size,
+                format_args!("AC18 section '{}'", section_name),
+            )?;
+            try_zeroed_vec(total_size, format_args!("AC18 section '{}'", section_name))?
+        };
+        let mut pages = Vec::new();
         let batch_pages = worker_count().saturating_mul(2);
         let mut skipped_pages = 0usize;
 
@@ -3671,6 +3707,21 @@ impl<R: Read + Seek> DwgReader<R> {
                 }
             }
 
+            if paged {
+                for (dst_start, stored) in prepared {
+                    if dst_start < total_size {
+                        self.charge_decompressed_bytes(
+                            stored.len(),
+                            format_args!("AC18 section '{}' page", section_name),
+                        )?;
+                        pages.push(Page {
+                            start: dst_start,
+                            stored: stored.into_boxed_slice(),
+                        });
+                    }
+                }
+                continue;
+            }
             let decoded = map_ordered(prepared, |(dst_start, compressed)| {
                 let decompressed = if is_compressed {
                     decompress_ac18(&compressed, max_page_size)
@@ -3701,7 +3752,15 @@ impl<R: Read + Seek> DwgReader<R> {
             );
         }
 
-        Ok(result)
+        if paged {
+            return Ok(ObjectSection::Paged(PagedSection::new(
+                total_size,
+                is_compressed,
+                max_page_size,
+                pages,
+            )));
+        }
+        Ok(ObjectSection::from(result))
     }
 
     /// Find a section descriptor by name.
