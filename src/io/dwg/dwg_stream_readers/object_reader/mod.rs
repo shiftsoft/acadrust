@@ -27,6 +27,7 @@ use crate::error::{DxfError, Result};
 use crate::io::dwg::dwg_stream_readers::merged_reader::DwgMergedReader;
 use crate::io::dwg::dwg_version::DwgVersion;
 use crate::io::dwg::mesh_budget::MeshFaceBudget;
+use crate::io::dwg::object_section::{check_range, ObjectSection, RecordBytes};
 use crate::types::{Color, DxfVersion, Transparency};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -135,7 +136,7 @@ pub struct NonEntityCommonData {
 /// DWG Object Reader — iterates the object section by handle map.
 pub struct DwgObjectReader {
     /// Raw object section data, shared by readers over the same section
-    data: Arc<Vec<u8>>,
+    data: Arc<ObjectSection>,
     /// DWG version
     version: DwgVersion,
     /// DXF version
@@ -156,6 +157,10 @@ pub struct DwgObjectReader {
 pub(crate) fn dwg_entity_invisible(raw: i16) -> bool {
     raw & 1 != 0
 }
+
+/// Bytes enough for a record's framing: a modular short of the size and,
+/// R2010 and later, a modular char of the handle bits.
+const RECORD_FRAME_BYTES: usize = 24;
 
 impl DwgObjectReader {
     /// Create a new object reader.
@@ -180,7 +185,7 @@ impl DwgObjectReader {
         encoding: impl Into<crate::io::dxf::code_page::LegacyEncoding>,
     ) -> Result<Self> {
         Self::with_handle_map(
-            data,
+            Arc::new(ObjectSection::Whole(data.into())),
             dxf_version,
             handle_map.into_iter().collect(),
             encoding,
@@ -189,7 +194,7 @@ impl DwgObjectReader {
 
     /// [`Self::with_encoding`] with the map [`DwgReader`](crate::DwgReader) reads.
     pub(crate) fn with_handle_map(
-        data: impl Into<Arc<Vec<u8>>>,
+        data: Arc<ObjectSection>,
         dxf_version: DxfVersion,
         handle_map: HandleMap,
         encoding: impl Into<crate::io::dxf::code_page::LegacyEncoding>,
@@ -229,21 +234,31 @@ impl DwgObjectReader {
                 self.data.len()
             )));
         }
-        let (size, ms_len) = read_modular_short(&self.data[offset..])?;
-        let mut pos = offset + ms_len;
+        let mut frame = [0u8; RECORD_FRAME_BYTES + 32];
+        let filled = self.data.head(offset, &mut frame);
+        let frame = &frame[..filled];
+        let (size, ms_len) = read_modular_short(frame)?;
+        let mut pos = ms_len;
         if self.version.r2010_plus() {
-            let (_, mc_len) = read_modular_char(&self.data[pos..])?;
+            let (_, mc_len) = read_modular_char(&frame[pos..])?;
             pos += mc_len;
         }
-        if size == 0 || pos >= self.data.len() || size > self.data.len() - pos {
+        let left = self.data.len() - offset;
+        if size == 0 || pos >= left || size > left - pos {
             return Err(DxfError::Parse(format!(
                 "Object record at {} has no type prefix",
                 offset
             )));
         }
-        let prefix_len = size.min(32).min(self.data.len() - pos);
-        Ok(PrefixBitReader::new(&self.data[pos..pos + prefix_len])
-            .read_object_type(self.dxf_version))
+        let prefix_len = size.min(32).min(left - pos);
+        let mut far = [0u8; 32];
+        let prefix = if pos + prefix_len <= frame.len() {
+            &frame[pos..pos + prefix_len]
+        } else {
+            let n = self.data.head(offset + pos, &mut far[..prefix_len]);
+            &far[..n]
+        };
+        Ok(PrefixBitReader::new(prefix).read_object_type(self.dxf_version))
     }
 
     /// Read a single object record at the given byte offset.
@@ -264,15 +279,18 @@ impl DwgObjectReader {
             )));
         }
 
-        let mut pos = offset;
+        let mut frame = [0u8; RECORD_FRAME_BYTES];
+        let filled = self.data.head(offset, &mut frame);
+        let frame = &frame[..filled];
+        let mut pos = 0;
 
         // 1. Read ModularShort (MS) — object size in bytes
-        let (size, ms_len) = read_modular_short(&self.data[pos..])?;
+        let (size, ms_len) = read_modular_short(frame)?;
         pos += ms_len;
 
         // 2. R2010+: Read ModularChar (MC) — handle stream bit count
         let handle_bits = if self.version.r2010_plus() {
-            let (hb, mc_len) = read_modular_char(&self.data[pos..])?;
+            let (hb, mc_len) = read_modular_char(&frame[pos..])?;
             pos += mc_len;
             hb as i64
         } else {
@@ -280,25 +298,25 @@ impl DwgObjectReader {
         };
 
         // 3. Extract merged data
-        if size > self.data.len().saturating_sub(pos) {
-            return Err(DxfError::Parse(format!(
-                "Object record extends past data: offset={}, size={}, data_len={}",
-                offset,
-                size,
-                self.data.len()
-            )));
-        }
-        self.read_raw_record(&self.data[pos..pos + size], handle_bits)
+        check_range(&self.data, offset + pos, size)?;
+        self.read_shared_record(
+            ObjectSection::record(&self.data, offset + pos, size),
+            handle_bits,
+        )
     }
 
     /// Decode an already captured merged record without adding file framing.
-    pub fn read_raw_record(
+    pub fn read_raw_record(&self, data: &[u8], handle_bits: i64) -> Result<(i16, DwgMergedReader)> {
+        self.read_shared_record(RecordBytes::Shared(Arc::from(data)), handle_bits)
+    }
+
+    /// [`Self::read_raw_record`] over bytes already in a shared buffer.
+    fn read_shared_record(
         &self,
-        data: &[u8],
+        merged_data: RecordBytes,
         handle_bits: i64,
     ) -> Result<(i16, DwgMergedReader)> {
-        let size = data.len();
-        let merged_data: Arc<[u8]> = Arc::from(data);
+        let size = merged_data.len();
 
         // 4. For R2007+ (ThreeStream): read type_code from a temp reader,
         //    then manually construct the three sub-readers with correct
@@ -315,8 +333,8 @@ impl DwgObjectReader {
             let dwg = DwgVersion::from_dxf_version(self.dxf_version).unwrap_or(DwgVersion::AC15);
 
             // Read type_code from temp reader
-            let mut temp = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
-                Arc::clone(&merged_data),
+            let mut temp = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
+                merged_data.clone(),
                 dwg,
                 self.dxf_version,
                 self.encoding,
@@ -352,8 +370,8 @@ impl DwgObjectReader {
                     "Invalid DWG object handle-stream boundary".into(),
                 ));
             }
-            let mut main_reader = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
-                Arc::clone(&merged_data),
+            let mut main_reader = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
+                merged_data.clone(),
                 dwg,
                 self.dxf_version,
                 self.encoding,
@@ -361,8 +379,8 @@ impl DwgObjectReader {
             main_reader.set_position_in_bits(data_start_bits);
 
             // Text reader: positioned by flag at flag_position
-            let mut text_reader = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
-                Arc::clone(&merged_data),
+            let mut text_reader = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
+                merged_data.clone(),
                 dwg,
                 self.dxf_version,
                 self.encoding,
@@ -377,8 +395,8 @@ impl DwgObjectReader {
 
             // Handle reader: starts at bit position handle_start (NOT byte-aligned).
             let mut handle_reader =
-                crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
-                    Arc::clone(&merged_data),
+                crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
+                    merged_data.clone(),
                     dwg,
                     self.dxf_version,
                     self.encoding,
@@ -414,8 +432,8 @@ impl DwgObjectReader {
         let handle_start_bits = if self.version.r2000_plus() {
             // Read BS + RL from a disposable temp reader to discover
             // the split point without consuming from the final reader.
-            let mut temp = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
-                Arc::clone(&merged_data),
+            let mut temp = crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
+                merged_data.clone(),
                 dwg,
                 self.dxf_version,
                 self.encoding,
@@ -434,8 +452,8 @@ impl DwgObjectReader {
             ));
         }
         let main_reader =
-            crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
-                Arc::clone(&merged_data),
+            crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
+                merged_data.clone(),
                 dwg,
                 self.dxf_version,
                 self.encoding,
@@ -443,7 +461,7 @@ impl DwgObjectReader {
 
         // Create handle reader positioned at handle_start_bits
         let mut handle_reader =
-            crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_shared_with_encoding(
+            crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader::from_record_with_encoding(
                 merged_data,
                 dwg,
                 self.dxf_version,

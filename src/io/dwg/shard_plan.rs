@@ -15,6 +15,7 @@ use crate::io::dwg::dwg_stream_readers::object_reader::common::{
     is_entity_type, OBJ_BLOCK, OBJ_BLOCK_HEADER, OBJ_ENDBLK,
 };
 use crate::io::dwg::dwg_stream_readers::object_reader::{tables, DwgObjectReader};
+use crate::io::dwg::object_section::ObjectSection;
 use crate::io::dwg::parallel::map_slice;
 
 /// Owner chains longer than this are treated as broken and not followed.
@@ -29,7 +30,7 @@ pub(crate) struct ShardState {
     pub(crate) max_entities: usize,
     /// The decompressed object section and the file's handle count, kept
     /// once the first shard has read them.
-    pub(crate) objects: Option<(Arc<Vec<u8>>, usize)>,
+    pub(crate) objects: Option<(Arc<ObjectSection>, usize)>,
     /// Records (handle → offset) every shard decodes.
     pub(crate) shared: HandleMap,
     /// Each shard's own records, taken as the shard is read.
@@ -57,7 +58,7 @@ impl ShardState {
     /// The object section, handle count and handle map of the current shard,
     /// when an earlier shard has already read the section and planned the
     /// shards.
-    pub(crate) fn resume(&mut self) -> Option<(Arc<Vec<u8>>, usize, HandleMap)> {
+    pub(crate) fn resume(&mut self) -> Option<(Arc<ObjectSection>, usize, HandleMap)> {
         let (objects, handle_count) = self.objects.clone()?;
         Some((objects, handle_count, self.handle_map()))
     }
@@ -67,7 +68,7 @@ impl ShardState {
     pub(crate) fn plan_first(
         &mut self,
         reader: &mut DwgObjectReader,
-        objects: Arc<Vec<u8>>,
+        objects: Arc<ObjectSection>,
         handle_count: usize,
         document: &CadDocument,
     ) {

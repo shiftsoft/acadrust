@@ -9,6 +9,7 @@
 
 use crate::io::dwg::dwg_reference_type::DwgReferenceType;
 use crate::io::dwg::dwg_version::DwgVersion;
+use crate::io::dwg::object_section::RecordBytes;
 use crate::types::{Color, DxfVersion, Transparency, Vector2, Vector3};
 use std::sync::Arc;
 
@@ -25,7 +26,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct DwgBitReader {
     /// Source data buffer.
-    data: Arc<[u8]>,
+    data: RecordBytes,
     /// Current stream byte position (points past the last byte read via advance_byte).
     position: usize,
     /// Current bit offset within `last_byte` (0 = no bits consumed yet from last_byte)
@@ -61,6 +62,16 @@ impl DwgBitReader {
     /// Object records have main/text/handle cursors over identical storage;
     /// sharing avoids three full record copies per cursor set.
     pub fn from_shared(data: Arc<[u8]>, version: DwgVersion, dxf_version: DxfVersion) -> Self {
+        Self::from_record(data.into(), version, dxf_version)
+    }
+
+    /// A reader over a record's bytes, shared or read from the object
+    /// section's pages.
+    pub(crate) fn from_record(
+        data: RecordBytes,
+        version: DwgVersion,
+        dxf_version: DxfVersion,
+    ) -> Self {
         Self {
             end_bit: (data.len() as i64).saturating_mul(8),
             error: std::sync::OnceLock::new(),
@@ -83,7 +94,17 @@ impl DwgBitReader {
         dxf_version: DxfVersion,
         encoding: impl Into<crate::io::dxf::code_page::LegacyEncoding>,
     ) -> Self {
-        let mut reader = Self::from_shared(data, version, dxf_version);
+        Self::from_record_with_encoding(data.into(), version, dxf_version, encoding)
+    }
+
+    /// [`Self::from_record`] with a text encoding.
+    pub(crate) fn from_record_with_encoding(
+        data: RecordBytes,
+        version: DwgVersion,
+        dxf_version: DxfVersion,
+        encoding: impl Into<crate::io::dxf::code_page::LegacyEncoding>,
+    ) -> Self {
+        let mut reader = Self::from_record(data, version, dxf_version);
         reader.encoding = encoding.into();
         reader
     }
@@ -217,7 +238,7 @@ impl DwgBitReader {
     /// Used to extract the raw merged-stream record bytes for
     /// round-trip preservation of unknown entities.
     pub fn data_bytes(&self) -> Vec<u8> {
-        self.data.as_ref().to_vec()
+        self.data.to_vec()
     }
 
     /// Set the stream position (byte-level) and reset bit shift.
@@ -252,7 +273,7 @@ impl DwgBitReader {
     /// Read the next raw byte from the stream into `last_byte`.
     pub fn advance_byte(&mut self) {
         if self.position < self.data.len() {
-            self.last_byte = self.data[self.position];
+            self.last_byte = self.data.byte(self.position);
             self.position += 1;
         } else {
             self.invalidate("Read past the end of DWG data");
@@ -1228,7 +1249,7 @@ impl DwgBitReader {
         }
         let end = (start + length).min(self.data.len());
         let available = end - start;
-        arr[..available].copy_from_slice(&self.data[start..end]);
+        self.data.copy(start, &mut arr[..available]);
         self.position = end;
 
         if self.bit_shift == 0 {
