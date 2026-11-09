@@ -105,13 +105,13 @@ fn fixture(version: DxfVersion) -> Fixture {
     let object = doc.allocate_handle();
     doc.objects.insert(
         object,
-        ObjectType::ProxyObject(ProxyObject {
+        ObjectType::ProxyObject(Box::new(ProxyObject {
             handle: object,
             owner: doc.header.named_objects_dict_handle,
             proxy_id: 499,
             class_id: number(&doc.classes, APPLICATION_OBJECT.0),
             ..Default::default()
-        }),
+        })),
     );
     Fixture {
         doc,

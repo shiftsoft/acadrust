@@ -2901,14 +2901,14 @@ mod registered_class_proxy_tests {
             .unwrap();
         doc.objects.insert(
             OBJECT,
-            ObjectType::RegisteredClass(RegisteredClassObject {
+            ObjectType::RegisteredClass(Box::new(RegisteredClassObject {
                 handle: OBJECT,
                 owner: doc.header.named_objects_dict_handle,
                 dxf_name: OBJECT_CLASS.0.to_string(),
                 cpp_class_name: OBJECT_CLASS.1.to_string(),
                 properties: properties(),
                 ..Default::default()
-            }),
+            })),
         );
         (doc, entity)
     }

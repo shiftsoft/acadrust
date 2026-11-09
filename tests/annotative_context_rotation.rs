@@ -43,7 +43,7 @@ fn dxf_with(kind: ObjectContextKind) -> Vec<u8> {
     let handle = doc.allocate_handle();
     doc.objects.insert(
         handle,
-        ObjectType::ObjectContextData(ObjectContextData {
+        ObjectType::ObjectContextData(Box::new(ObjectContextData {
             handle,
             owner_handle: owner,
             reactors: vec![owner],
@@ -54,7 +54,7 @@ fn dxf_with(kind: ObjectContextKind) -> Vec<u8> {
             is_default: true,
             scale,
             kind,
-        }),
+        })),
     );
     DxfWriter::new(&doc).write_to_vec().expect("DXF write")
 }

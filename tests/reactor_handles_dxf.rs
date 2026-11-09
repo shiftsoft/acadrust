@@ -148,7 +148,7 @@ fn test_associative_object_header_handles_filtered() {
     let variable = document.allocate_handle();
     document.objects.insert(
         variable,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle: variable,
             owner: dangling,
             reactors: vec![line_handle, Handle::NULL, Handle::new(0xDEADBEEF), dangling],
@@ -160,7 +160,7 @@ fn test_associative_object_header_handles_filtered() {
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
 
     let bytes = DxfWriter::new(&document).write_to_vec().unwrap();

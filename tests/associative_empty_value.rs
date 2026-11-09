@@ -52,7 +52,7 @@ fn round_trip_action_values(values: Vec<AssocValueParam>) -> (Vec<AssocValuePara
     let handle = document.allocate_handle();
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner: document.header.named_objects_dict_handle,
             dxf_name: "ASSOCACTION".to_string(),
@@ -63,17 +63,17 @@ fn round_trip_action_values(values: Vec<AssocValueParam>) -> (Vec<AssocValuePara
                 ..Default::default()
             }),
             ..Default::default()
-        }),
+        })),
     );
     let decoded = round_trip(&document);
     let values = decoded
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::Action(action),
-                ..
-            }) => Some(action.values.clone()),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::Action(action) => Some(action.values.clone()),
+                _ => None,
+            },
             _ => None,
         })
         .unwrap();
@@ -200,14 +200,14 @@ fn standalone_variable_empty_value_keeps_code_zero() {
     };
     document.objects.insert(
         handle,
-        ObjectType::Associative(AssociativeObject {
+        ObjectType::Associative(Box::new(AssociativeObject {
             handle,
             owner: document.header.named_objects_dict_handle,
             dxf_name: "ASSOCVARIABLE".to_string(),
             cpp_class_name: "AcDbAssocVariable".to_string(),
             data: AssociativeData::Variable(variable.clone()),
             ..Default::default()
-        }),
+        })),
     );
 
     let decoded = round_trip(&document);
@@ -215,10 +215,10 @@ fn standalone_variable_empty_value_keeps_code_zero() {
         .objects
         .values()
         .find_map(|object| match object {
-            ObjectType::Associative(AssociativeObject {
-                data: AssociativeData::Variable(variable),
-                ..
-            }) => Some(variable),
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::Variable(variable) => Some(variable),
+                _ => None,
+            },
             _ => None,
         })
         .unwrap();
