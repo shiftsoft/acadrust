@@ -33,6 +33,14 @@ pub(crate) enum ObjectSection {
     Paged(PagedSection),
 }
 
+/// An empty section: what a reader holds once it lets the bytes go
+/// (`release_section`).
+impl Default for ObjectSection {
+    fn default() -> Self {
+        Self::Whole(Arc::default())
+    }
+}
+
 impl From<Arc<Vec<u8>>> for ObjectSection {
     fn from(bytes: Arc<Vec<u8>>) -> Self {
         Self::Whole(bytes)
